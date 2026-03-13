@@ -82,6 +82,70 @@ const PRACTICES = [
   { id:"software_dev_mgmt",            name:"Software Development Management",    group:"Technical Management" },
 ];
 
+/* ─── Gap Analysis Mapping ───────────────────────────────────────── */
+const GAP_MAP = {
+  incident_mgmt: {
+    function: "Service Desk & Incident Management",
+    gap: "Reactive incident handling with high MTTR and lack of major incident procedures.",
+    mitigation: "Implement automated ticket routing, define OLA/SLA metrics, and establish a dedicated Major Incident Management (MIM) process.",
+    timeline: "3–6 Months"
+  },
+  change_enablement: {
+    function: "Change & Release Management",
+    gap: "Manual change approvals causing bottlenecks; high rate of failed changes due to lack of risk assessment.",
+    mitigation: "Standardise change models, implement automated risk scoring, and integrate with CI/CD pipelines.",
+    timeline: "4–8 Months"
+  },
+  problem_mgmt: {
+    function: "Problem Management",
+    gap: "Lack of proactive trend analysis; recurrence of known errors due to missing Root Cause Analysis (RCA).",
+    mitigation: "Establish a dedicated Problem Management team, implement KEDB (Known Error Database), and conduct weekly trend reviews.",
+    timeline: "6–12 Months"
+  },
+  service_level_mgmt: {
+    function: "Service Level Management",
+    gap: "SLAs are outdated and do not align with business needs; lack of real-time performance reporting.",
+    mitigation: "Conduct Business Impact Analysis (BIA), redefine XLAs (Experience Level Agreements), and implement automated dashboarding.",
+    timeline: "3–5 Months"
+  },
+  info_security_mgmt: {
+    function: "Information Security Management",
+    gap: "Security controls are inconsistently applied; lack of automated vulnerability scanning.",
+    mitigation: "Align with ISO 27001, implement automated security monitoring, and conduct regular compliance audits.",
+    timeline: "6–12 Months"
+  },
+  it_asset_mgmt: {
+    function: "IT Asset Management",
+    gap: "Inaccurate asset register; lack of lifecycle management leads to licensing risks and wastage.",
+    mitigation: "Implement automated discovery tools, integrate ITAM with Procurement, and conduct quarterly reconciliation.",
+    timeline: "5–9 Months"
+  }
+};
+
+function analyzeGaps(scores) {
+  const opportunities = [];
+  for (const pid of Object.keys(scores)) {
+    const score = scores[pid];
+    if (score < 3.0) {
+      const p = PRACTICES.find(x => x.id === pid);
+      if (!p) continue;
+      const map = GAP_MAP[pid] || {
+        function: p.group || "ITSM General",
+        gap: `${p.name} process maturity is below industry standard (Level 3).`,
+        mitigation: `Standardise ${p.name} procedures, implement supporting toolsets, and define KPI reporting.`,
+        timeline: "6–9 Months"
+      };
+      opportunities.push({
+        practiceId: pid,
+        practiceName: p.name,
+        score: score,
+        ...map
+      });
+    }
+  }
+  return opportunities;
+}
+
 const GROUPS = ["General Management","Service Management","Technical Management"];
 
 /* ─── QB Parser (SheetJS) ───────────────────────────────────────── */
@@ -456,11 +520,34 @@ export default function App() {
 
     // Automatic cloud upload
     if (IS_VERCEL) {
-      const { success, error } = await saveToCloud();
-      if (success) {
-        showToast("Assessment submitted & saved to cloud!", "success");
-      } else {
-        showToast(`Submitted locally, but cloud save failed: ${error}`, "error");
+      // 1. Save PDF report
+      try {
+        const { success, error } = await saveToCloud();
+        if (success) {
+          showToast("Assessment submitted & saved to cloud!", "success");
+        } else {
+          showToast(`Submitted locally, but cloud save failed: ${error}`, "error");
+        }
+      } catch (err) {
+        showToast("Assessment submitted locally; cloud save error.", "error");
+      }
+      
+      // 2. Log Business Opportunities
+      try {
+        const gaps = analyzeGaps(submissionData.scores);
+        if (gaps.length > 0) {
+          await api.call("POST", "/api/opportunities", {
+            companyName: submissionData.companyProfile?.companyName,
+            industry: submissionData.companyProfile?.industry,
+            employeeStrength: submissionData.companyProfile?.employeeStrength,
+            itsmTools: submissionData.companyProfile?.itsmTools,
+            username: submissionData.username,
+            timestamp: submissionData.ts,
+            gaps: gaps
+          });
+        }
+      } catch (oppErr) {
+        console.warn("Failed to log opportunities:", oppErr);
       }
     } else {
       showToast("Assessment submitted successfully!", "success");
@@ -728,6 +815,12 @@ function AdminDashboard({ onBack, showToast }) {
   const [cloudErr,         setCloudErr]         = useState("");
   const [deletingReport,   setDeletingReport]   = useState(null);
   const [savingPdfFor,     setSavingPdfFor]     = useState(null); // username being cloud-saved
+  
+  // Opportunities state
+  const [opportunities,    setOpportunities]    = useState([]);
+  const [oppLoading,       setOppLoading]       = useState(false);
+  const [oppErr,           setOppErr]           = useState("");
+  const [deletingOpp,      setDeletingOpp]      = useState(null);
 
   // Reload users — try remote first, fall back to localStorage
   async function reloadUsers() {
@@ -748,11 +841,20 @@ function AdminDashboard({ onBack, showToast }) {
   }
   useEffect(() => { reloadUsers(); }, []);
 
-  // Load cloud reports when tab is opened
+  // Load data when tabs switch
   useEffect(() => {
-    if (tab !== "reports") return;
-    loadCloudReports();
+    if (tab === "reports") loadCloudReports();
+    if (tab === "opps")    loadOpportunities();
   }, [tab, viewUser]);
+
+  async function loadOpportunities() {
+    if (!IS_VERCEL) { setOppErr("Opportunities require a Vercel deployment."); return; }
+    setOppLoading(true); setOppErr("");
+    const { ok, data } = await api.call("GET", "/api/opportunities");
+    setOppLoading(false);
+    if (ok && Array.isArray(data)) { setOpportunities(data); }
+    else { setOppErr("Could not load opportunities."); }
+  }
 
   async function loadCloudReports() {
     if (!IS_VERCEL) { setCloudErr("Cloud reports require a Vercel deployment."); return; }
@@ -856,6 +958,50 @@ function AdminDashboard({ onBack, showToast }) {
     }
   }
 
+  async function deleteOpportunity(id) {
+    if (!window.confirm("Delete this opportunity lead?")) return;
+    setDeletingOpp(id);
+    const { ok, data } = await api.call("DELETE", `/api/opportunities?id=${encodeURIComponent(id)}`);
+    setDeletingOpp(null);
+    if (ok) {
+      showToast("Opportunity deleted", "success");
+      setOpportunities(prev => prev.filter(o => o.id !== id));
+    } else {
+      showToast(data?.error || "Delete failed", "error");
+    }
+  }
+
+  function exportOpportunitiesCSV() {
+    if (opportunities.length === 0) return;
+    let csv = "Timestamp,Company,Industry,Employees,Tools,Username,Practice,Gap,Mitigation,Timeline\n";
+    opportunities.forEach(opp => {
+      if (!opp.gaps) return;
+      opp.gaps.forEach(gap => {
+        const row = [
+          new Date(opp.timestamp).toLocaleString(),
+          `"${opp.companyName || ""}"`,
+          `"${opp.industry || ""}"`,
+          `"${opp.employeeBase || opp.employeeStrength || ""}"`,
+          `"${(opp.itsmTools || opp.currentItsmTools || []).join("; ")}"`,
+          opp.username || "",
+          `"${gap.practiceName || ""}"`,
+          `"${(gap.gap || "").replace(/"/g, '""')}"`,
+          `"${(gap.mitigation || "").replace(/"/g, '""')}"`,
+          `"${gap.timeline || ""}"`
+        ].join(",");
+        csv += row + "\n";
+      });
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `ITSM_Opportunities_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   const tabStyle = active => ({
     padding:"8px 20px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:600, fontSize:13,
     background: active ? TC : "transparent",
@@ -899,6 +1045,9 @@ function AdminDashboard({ onBack, showToast }) {
           </button>
           <button style={tabStyle(tab==="reports")} onClick={()=>setTab("reports")}>
             ☁️ Cloud Reports
+          </button>
+          <button style={tabStyle(tab==="opps")}    onClick={()=>setTab("opps")}>
+            💼 Opportunities
           </button>
         </div>
 
@@ -1291,6 +1440,86 @@ function AdminDashboard({ onBack, showToast }) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ══════════ OPPORTUNITIES TAB ══════════ */}
+        {tab === "opps" && (
+          <div style={{background:"#fff", borderRadius:12, padding:24, boxShadow:"0 1px 4px rgba(0,0,0,.08)"}}>
+             <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20}}>
+               <div>
+                 <h3 style={{margin:0, color:TC, fontSize:18}}>Business Opportunity Tracker</h3>
+                 <p style={{margin:"4px 0 0", fontSize:13, color:"#64748b"}}>
+                   Gaps identified in assessments (Maturity {"<"} 3.0)
+                 </p>
+               </div>
+               <div style={{display:"flex", gap:10}}>
+                 <button onClick={exportOpportunitiesCSV} disabled={opportunities.length===0}
+                  style={{padding:"8px 16px", borderRadius:8, border:"none", background:TCG, color:"#fff", 
+                    fontSize:13, fontWeight:600, cursor:opportunities.length===0?"not-allowed":"pointer"}}>
+                   📥 Export CSV
+                 </button>
+                 <button onClick={loadOpportunities}
+                   style={{padding:"8px 16px", borderRadius:8, border:"1px solid #e2e8f0", background:"#f8fafc", 
+                    cursor:"pointer", fontSize:13, color:"#64748b"}}>
+                   ↻ Refresh
+                 </button>
+               </div>
+             </div>
+
+             {oppLoading && <div style={{textAlign:"center", padding:40, color:"#94a3b8"}}>Loading opportunities...</div>}
+             {oppErr && <div style={{padding:20, background:"#fef2f2", color:TCR, borderRadius:8, fontSize:14}}>{oppErr}</div>}
+             
+             {!oppLoading && !oppErr && opportunities.length === 0 && (
+               <div style={{textAlign:"center", padding:60, color:"#94a3b8", background:"#f8fafc", borderRadius:12}}>
+                 No conversion opportunities found yet. Logged when users submit assessments with maturity gaps.
+               </div>
+             )}
+
+             {!oppLoading && !oppErr && opportunities.map(opp => (
+               <div key={opp.id} style={{marginBottom:32, padding:20, border:"1px solid #e2e8f0", borderRadius:12}}>
+                 <div style={{display:"flex", justifyContent:"space-between", marginBottom:16, borderBottom:"1px dashed #e2e8f0", paddingBottom:12}}>
+                   <div>
+                     <div style={{fontSize:18, fontWeight:700, color:TC}}>{opp.companyName}</div>
+                     <div style={{fontSize:12, color:"#64748b", marginTop:2}}>
+                       {opp.industry} · {opp.employeeStrength} employees · Tools: {(opp.itsmTools||[]).join(", ")}
+                     </div>
+                   </div>
+                   <div style={{textAlign:"right"}}>
+                     <div style={{fontSize:12, color:"#94a3b8"}}>{new Date(opp.timestamp).toLocaleString()}</div>
+                     <button onClick={()=>deleteOpportunity(opp.id)} disabled={deletingOpp===opp.id}
+                       style={{color:TCR, background:"none", border:"none", fontSize:11, fontWeight:700, cursor:"pointer", padding:0, marginTop:4}}>
+                       DELETE LOG
+                     </button>
+                   </div>
+                 </div>
+
+                 <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))", gap:16}}>
+                   {opp.gaps.map((gap, idx) => (
+                     <div key={idx} style={{background:"#f8fafc", padding:16, borderRadius:8, borderLeft:`4px solid ${gap.score < 2 ? TCR : "#eab308"}`}}>
+                       <div style={{display:"flex", justifyContent:"space-between", marginBottom:10}}>
+                         <div style={{fontWeight:700, color:"#1e293b", fontSize:14}}>{gap.practiceName}</div>
+                         <div style={{fontSize:12, fontWeight:800, color: gap.score < 2 ? TCR : "#eab308"}}>
+                           Score: {gap.score.toFixed(1)}
+                         </div>
+                       </div>
+                       <div style={{marginBottom:10}}>
+                         <div style={{fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase"}}>Current Gap</div>
+                         <div style={{fontSize:13, color:"#1e293b", lineHeight:1.4}}>{gap.gap}</div>
+                       </div>
+                       <div style={{marginBottom:10}}>
+                         <div style={{fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase"}}>Mitigation Roadmap</div>
+                         <div style={{fontSize:13, color:"#1e293b", lineHeight:1.4}}>{gap.mitigation}</div>
+                       </div>
+                       <div>
+                         <div style={{fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase"}}>Estimated Timeline</div>
+                         <div style={{fontSize:13, fontWeight:600, color:TC}}>{gap.timeline}</div>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               </div>
+             ))}
           </div>
         )}
       </div>
