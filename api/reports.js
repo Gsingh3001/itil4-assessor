@@ -80,7 +80,7 @@ export default async function handler(req, res) {
       const pathname = `reports/${user}/${date}_${company}_${ts}.html`;
 
       const blob = await put(pathname, htmlContent, {
-        access: "private",
+        access: "public",
         contentType: "text/html; charset=utf-8",
         addRandomSuffix: false,
       });
