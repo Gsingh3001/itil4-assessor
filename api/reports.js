@@ -85,6 +85,18 @@ export default async function handler(req, res) {
         addRandomSuffix: false,
       });
 
+      // Mark user as submitted in KV
+      try {
+        const users = (await kv.get(USERS_KV_KEY)) || {};
+        if (users[user]) {
+          users[user].isSubmitted = true;
+          users[user].submittedAt = new Date().toISOString();
+          await kv.set(USERS_KV_KEY, users);
+        }
+      } catch (kvErr) {
+        console.warn("Failed to update isSubmitted in KV:", kvErr);
+      }
+
       return res.status(201).json({
         url: blob.url,
         pathname: blob.pathname,

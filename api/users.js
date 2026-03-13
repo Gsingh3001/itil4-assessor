@@ -71,7 +71,11 @@ export default async function handler(req, res) {
       const u = users[username];
       if (!u || u.password !== password)
         return res.status(401).json({ error: "Invalid credentials" });
-      return res.status(200).json({ name: u.name || username, role: u.role || "user" });
+      return res.status(200).json({
+        name: u.name || username,
+        role: u.role || "user",
+        isSubmitted: !!u.isSubmitted
+      });
     }
 
     /* ── GET: list users (admin only) ──────────────────────────── */

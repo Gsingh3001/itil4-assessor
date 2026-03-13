@@ -315,7 +315,7 @@ export default function App() {
     const profile   = ls.get(`${PROFILE_KEY}_${username}`);
     const selprac   = ls.get(`${SEL_PRAC_KEY}_${username}`);
     const isSubmit  = ls.get(`${SUBMIT_KEY}_${username}`);
-    if (isSubmit) {
+    if (isSubmit || user?.isSubmitted) {
       if (profile) setCompanyProfile(profile);
       if (selprac) setSelectedPractices(selprac);
       setSubmitted(true);
@@ -358,7 +358,12 @@ export default function App() {
       const { ok, data } = await api.call("POST", "/api/users?action=auth",
         { username, password });
       if (ok) {
-        const ses = { username, name: data.name || username, role: data.role || "user" };
+        const ses = {
+          username,
+          name: data.name || username,
+          role: data.role || "user",
+          isSubmitted: !!data.isSubmitted
+        };
         setUser(ses);
         ss.set(USER_SES_KEY, ses);
         // Store credentials token for subsequent admin API calls
@@ -445,7 +450,17 @@ export default function App() {
     ls.set(HISTORY_KEY, hist);
     setSubmitted(true);
     setScreen("submitted");
-    showToast("Assessment submitted successfully!", "success");
+    showToast("Assessment submitted. Saving to cloud...", "info");
+
+    // Automatic cloud upload
+    if (IS_VERCEL) {
+      saveToCloud().then(success => {
+        if (success) showToast("Assessment submitted & saved to cloud!", "success");
+        else showToast("Assessment submitted locally, but cloud save failed.", "error");
+      });
+    } else {
+      showToast("Assessment submitted successfully!", "success");
+    }
   }
 
   const completedCount = Object.keys(scores).length;
@@ -3365,8 +3380,13 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
       timestamp:    Date.now(),
     });
     setCloudSaving(false);
-    if (ok) { setCloudUrl(data.url); }
-    else    { alert("Cloud save failed: " + (data?.detail || data?.error || "unknown error")); }
+    if (ok) {
+      setCloudUrl(data.url);
+      return true;
+    } else {
+      alert("Cloud save failed: " + (data?.detail || data?.error || "unknown error"));
+      return false;
+    }
   }
 
   return (
