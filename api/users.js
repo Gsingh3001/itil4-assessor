@@ -16,7 +16,7 @@
 
 import { kv } from "@vercel/kv";
 
-const USERS_KV_KEY = "itsm_tcs_v4_users";
+const USERS_KV_KEY = "itsm_v4_users";
 const DEFAULT_ADMIN = {
   Admin: { password: "Guessme0t", role: "admin", name: "Administrator" },
 };

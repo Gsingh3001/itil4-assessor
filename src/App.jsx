@@ -8,7 +8,7 @@ import {
 
 /* ─── Branding ─────────────────────────────────────────────────── */
 const TOOL_NAME = "ITSM Maturity Assessor";
-const ORG_BRAND = "TCS ITSM Practice";
+const ORG_BRAND = "ITSM Practice";
 const VERSION   = "V4.0";
 const TC  = "#003087";
 const TCR = "#c8102e";
@@ -16,14 +16,14 @@ const TCL = "#009BDE";
 const TCG = "#00A94F";
 
 /* ─── Storage Keys ──────────────────────────────────────────────── */
-const USERS_KEY    = "itsm_tcs_v4_users";
-const USER_SES_KEY = "itsm_tcs_v4_usersession";
-const STORAGE_KEY  = "itsm_tcs_v4";
-const HISTORY_KEY  = "itsm_tcs_history";
-const PROFILE_KEY  = "itsm_tcs_v4_profile";   // per-user: itsm_tcs_v4_profile_<username>
-const SEL_PRAC_KEY = "itsm_tcs_v4_selprac";   // per-user: itsm_tcs_v4_selprac_<username>
-const SUBMIT_KEY   = "itsm_tcs_v4_submitted";  // per-user: itsm_tcs_v4_submitted_<username>
-const SUBMISSION_KEY = "itsm_tcs_v4_submission"; // per-user: full submission data for admin PDF
+const USERS_KEY    = "itsm_v4_users";
+const USER_SES_KEY = "itsm_v4_usersession";
+const STORAGE_KEY  = "itsm_v4";
+const HISTORY_KEY  = "itsm_history";
+const PROFILE_KEY  = "itsm_v4_profile";   // per-user: itsm_v4_profile_<username>
+const SEL_PRAC_KEY = "itsm_v4_selprac";   // per-user: itsm_v4_selprac_<username>
+const SUBMIT_KEY   = "itsm_v4_submitted";  // per-user: itsm_v4_submitted_<username>
+const SUBMISSION_KEY = "itsm_v4_submission"; // per-user: full submission data for admin PDF
 
 const ITSM_TOOLS = ["ServiceNow","Jira","BMC Remedy","Freshservice","Zendesk","ManageEngine","Other"];
 const INDUSTRIES = ["Banking & Financial Services","Insurance","Healthcare & Life Sciences","Retail & Consumer",
@@ -229,7 +229,7 @@ const IS_VERCEL = typeof window !== "undefined" &&
    window.location.hostname !== "127.0.0.1");
 
 // Store admin credentials (Base64) in sessionStorage for authenticated API calls
-const TOKEN_KEY = "itsm_tcs_v4_apitoken";
+const TOKEN_KEY = "itsm_v4_apitoken";
 const api = {
   setToken: (username, password) =>
     ss.set(TOKEN_KEY, btoa(`${username}:${password}`)),
@@ -1844,7 +1844,7 @@ function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, sele
           <div>
             <div style={{fontWeight:700,color:"#856404",fontSize:14,marginBottom:4}}>What happens next?</div>
             <div style={{fontSize:13,color:"#664d03"}}>
-              Your TCS ITSM Practice consultant will review your submission and prepare a full
+              Your ITSM Practice consultant will review your submission and prepare a full
               PDF report with detailed recommendations. Expect to receive it within 2–3 business days.
             </div>
           </div>
@@ -3257,9 +3257,9 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
     </div>
     <div class="card">
       <h3>Contact & Next Steps</h3>
-      <p style="font-size:12px;">To discuss the findings, commission a Phase 1 engagement, or schedule an executive briefing, contact your TCS ITSM Practice account team.</p>
+      <p style="font-size:12px;">To discuss the findings, commission a Phase 1 engagement, or schedule an executive briefing, contact your ITSM Practice account team.</p>
       <div style="margin-top:12px;">
-        ${[["🌐 Website","www.tcs.com/itsm"],["📧 Practice Lead","itsm-practice@tcs.com"],["📞 Global ITSM Hotline","+44 20 xxxx xxxx"],["📋 Next Assessment","Recommended in 6 months"]].map(([l,v])=>`<div style="display:flex;gap:8px;font-size:12px;padding:6px 0;border-bottom:1px solid #f1f5f9;"><strong style="width:120px;flex-shrink:0;color:#475569;">${l}</strong><span>${v}</span></div>`).join("")}
+        ${[["🌐 Website","www.itsmpractice.com"],["📧 Practice Lead","contact@itsmpractice.com"],["📞 Global ITSM Hotline","+xx xxxx xxxx"],["📋 Next Assessment","Recommended in 6 months"]].map(([l,v])=>`<div style="display:flex;gap:8px;font-size:12px;padding:6px 0;border-bottom:1px solid #f1f5f9;"><strong style="width:120px;flex-shrink:0;color:#475569;">${l}</strong><span>${v}</span></div>`).join("")}
       </div>
     </div>
   </div>
@@ -3269,7 +3269,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
     <div style="font-size:10px;color:rgba(255,255,255,.5);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">Confidential — For Executive Use Only</div>
     <div style="color:#fff;font-weight:700;font-size:14px;">${TOOL_NAME} · ${ORG_BRAND} · ${VERSION}</div>
     <div style="color:rgba(255,255,255,.6);font-size:11px;margin-top:4px;">${dateStr} · ITIL 4 Process Maturity Assessment</div>
-    <div style="color:rgba(255,255,255,.4);font-size:10px;margin-top:8px;">ITIL® is a registered trademark of AXELOS Limited. This assessment is produced using the TCS ITSM Maturity Framework aligned to ITIL 4 Guidelines.</div>
+    <div style="color:rgba(255,255,255,.4);font-size:10px;margin-top:8px;">ITIL® is a registered trademark of AXELOS Limited. This assessment is produced using the ITSM Maturity Framework aligned to ITIL 4 Guidelines.</div>
   </div>
 </div>`;
 

@@ -18,7 +18,7 @@
 import { put, list, del } from "@vercel/blob";
 import { kv } from "@vercel/kv";
 
-const USERS_KV_KEY = "itsm_tcs_v4_users";
+const USERS_KV_KEY = "itsm_v4_users";
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
