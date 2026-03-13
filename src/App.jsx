@@ -16,10 +16,20 @@ const TCL = "#009BDE";
 const TCG = "#00A94F";
 
 /* ─── Storage Keys ──────────────────────────────────────────────── */
-const USERS_KEY   = "itsm_tcs_v4_users";
-const USER_SES_KEY= "itsm_tcs_v4_usersession";
-const STORAGE_KEY = "itsm_tcs_v4";
-const HISTORY_KEY = "itsm_tcs_history";
+const USERS_KEY    = "itsm_tcs_v4_users";
+const USER_SES_KEY = "itsm_tcs_v4_usersession";
+const STORAGE_KEY  = "itsm_tcs_v4";
+const HISTORY_KEY  = "itsm_tcs_history";
+const PROFILE_KEY  = "itsm_tcs_v4_profile";   // per-user: itsm_tcs_v4_profile_<username>
+const SEL_PRAC_KEY = "itsm_tcs_v4_selprac";   // per-user: itsm_tcs_v4_selprac_<username>
+const SUBMIT_KEY   = "itsm_tcs_v4_submitted";  // per-user: itsm_tcs_v4_submitted_<username>
+const SUBMISSION_KEY = "itsm_tcs_v4_submission"; // per-user: full submission data for admin PDF
+
+const ITSM_TOOLS = ["ServiceNow","Jira","BMC Remedy","Freshservice","Zendesk","ManageEngine","Other"];
+const INDUSTRIES = ["Banking & Financial Services","Insurance","Healthcare & Life Sciences","Retail & Consumer",
+  "Manufacturing","Telecommunications","Energy & Utilities","Public Sector / Government",
+  "Media & Entertainment","Technology","Professional Services","Other"];
+const EMP_SIZES  = ["<500","500–2000","2000–10000","10000+"];
 
 /* ─── Dimensions ────────────────────────────────────────────────── */
 const DIMS = {
@@ -209,8 +219,44 @@ const ss = {
 
 function initUsers() {
   const users = ls.get(USERS_KEY, null);
-  if (!users) ls.set(USERS_KEY, { Admin: { password:"Admin", role:"admin", name:"Administrator" } });
+  if (!users) ls.set(USERS_KEY, { Admin: { password:"Guessme0t", role:"admin", name:"Administrator" } });
 }
+
+/* ─── Remote API helpers ────────────────────────────────────────── */
+// Detect if we're running on Vercel (API routes available)
+const IS_VERCEL = typeof window !== "undefined" &&
+  (window.location.hostname !== "localhost" &&
+   window.location.hostname !== "127.0.0.1");
+
+// Store admin credentials (Base64) in sessionStorage for authenticated API calls
+const TOKEN_KEY = "itsm_tcs_v4_apitoken";
+const api = {
+  setToken: (username, password) =>
+    ss.set(TOKEN_KEY, btoa(`${username}:${password}`)),
+  getToken: () => ss.get(TOKEN_KEY, null),
+  clearToken: () => ss.set(TOKEN_KEY, null),
+
+  authHeader: () => {
+    const t = ss.get(TOKEN_KEY, null);
+    return t ? { Authorization: `Basic ${t}` } : {};
+  },
+
+  // Try remote, fall back to null on network error
+  async call(method, path, body) {
+    try {
+      const opts = {
+        method,
+        headers: { "Content-Type": "application/json", ...api.authHeader() },
+      };
+      if (body !== undefined) opts.body = JSON.stringify(body);
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    } catch {
+      return { ok: false, status: 0, data: {} };
+    }
+  },
+};
 
 /* ─── App Root ──────────────────────────────────────────────────── */
 export default function App() {
@@ -227,15 +273,24 @@ export default function App() {
   const [reportData,  setReportData]  = useState(null);  // for report screen
   const [modal,       setModal]       = useState(null);   // { title, msg, onOk }
   const [toast,       setToast]       = useState(null);
+  // ── New state for BUG 1/2/3/5 ──
+  const [companyProfile,    setCompanyProfile]    = useState(null);  // { companyName, industry, employeeStrength, itsmTools[] }
+  const [selectedPractices, setSelectedPractices] = useState([]);    // practice ids chosen by user
+  const [submitted,         setSubmitted]         = useState(false); // final submit lock
 
   const showToast = useCallback((msg, type="info") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // Load QB from Excel on mount
+  // Load QB from Excel on mount + seed remote users
   useEffect(() => {
+    // Seed local users (always)
     initUsers();
+    // Seed remote KV on Vercel (no-op if already seeded)
+    if (IS_VERCEL) {
+      api.call("PUT", "/api/users?action=init").catch(() => {});
+    }
     loadQBFromExcel().then(loaded => {
       if (loaded) {
         setQb(loaded);
@@ -248,20 +303,43 @@ export default function App() {
     });
   }, []);
 
+  // Helper: route user after login/restore
+  function routeAfterLogin(username) {
+    const saved = ls.get(STORAGE_KEY);
+    if (saved && saved.username === username) {
+      setScores(saved.scores || {});
+      setDimScores(saved.dimScores || {});
+      setAnswers(saved.answers || {});
+      setLevels(saved.levels || {});
+    }
+    const profile   = ls.get(`${PROFILE_KEY}_${username}`);
+    const selprac   = ls.get(`${SEL_PRAC_KEY}_${username}`);
+    const isSubmit  = ls.get(`${SUBMIT_KEY}_${username}`);
+    if (isSubmit) {
+      if (profile) setCompanyProfile(profile);
+      if (selprac) setSelectedPractices(selprac);
+      setSubmitted(true);
+      setScreen("submitted");
+    } else if (!profile) {
+      setScreen("companyprofile");
+    } else {
+      setCompanyProfile(profile);
+      if (!selprac || !selprac.length) {
+        setScreen("practiceconfig");
+      } else {
+        setSelectedPractices(selprac);
+        setScreen("welcome");
+      }
+    }
+  }
+
   // Restore session
   useEffect(() => {
     if (!qbReady) return;
     const ses = ss.get(USER_SES_KEY);
     if (ses?.username) {
       setUser(ses);
-      const saved = ls.get(STORAGE_KEY);
-      if (saved) {
-        setScores(saved.scores || {});
-        setDimScores(saved.dimScores || {});
-        setAnswers(saved.answers || {});
-        setLevels(saved.levels || {});
-      }
-      setScreen("welcome");
+      routeAfterLogin(ses.username);
     } else {
       setScreen("userlogin");
     }
@@ -274,20 +352,40 @@ export default function App() {
     }
   }, [scores, dimScores, answers, levels, user]);
 
-  function login(username, password) {
+  async function login(username, password) {
+    // ── Try remote API first (Vercel deployment) ──
+    if (IS_VERCEL) {
+      const { ok, data } = await api.call("POST", "/api/users?action=auth",
+        { username, password });
+      if (ok) {
+        const ses = { username, name: data.name || username, role: data.role || "user" };
+        setUser(ses);
+        ss.set(USER_SES_KEY, ses);
+        // Store credentials token for subsequent admin API calls
+        api.setToken(username, password);
+        return true;
+      }
+      // If we got a real 401/403 from the server, reject immediately
+      if (data?.error && data.error !== "Internal server error") return false;
+      // Otherwise fall through to local fallback (network error / cold start)
+    }
+    // ── Local localStorage fallback ──
     const users = ls.get(USERS_KEY, {});
     const u = users[username];
     if (!u || u.password !== password) return false;
     const ses = { username, name: u.name || username, role: u.role || "user" };
     setUser(ses);
     ss.set(USER_SES_KEY, ses);
+    api.setToken(username, password);
     return true;
   }
 
   function logout() {
     ss.set(USER_SES_KEY, null);
+    api.clearToken();
     setUser(null);
     setScores({}); setDimScores({}); setAnswers({}); setLevels({});
+    setCompanyProfile(null); setSelectedPractices([]); setSubmitted(false);
     setScreen("userlogin");
   }
 
@@ -315,6 +413,41 @@ export default function App() {
     setScreen("report");
   }
 
+  function saveProfile(profile) {
+    ls.set(`${PROFILE_KEY}_${user.username}`, profile);
+    setCompanyProfile(profile);
+    setScreen("practiceconfig");
+  }
+
+  function savePracticeConfig(practices) {
+    ls.set(`${SEL_PRAC_KEY}_${user.username}`, practices);
+    setSelectedPractices(practices);
+    setScreen("welcome");
+  }
+
+  function finalSubmit() {
+    const practiceRows = PRACTICES.filter(p => scores[p.id] != null);
+    const n = practiceRows.length;
+    const avgScore = n > 0 ? practiceRows.reduce((s,p)=>s+scores[p.id],0)/n : 0;
+    const submissionData = {
+      username: user.username,
+      ts: Date.now(),
+      scores, dimScores, levels,
+      completedCount: n,
+      avgScore,
+      companyProfile,
+    };
+    ls.set(`${SUBMIT_KEY}_${user.username}`, true);
+    ls.set(`${SUBMISSION_KEY}_${user.username}`, submissionData);
+    // Also save to shared history for admin view
+    const hist = ls.get(HISTORY_KEY, []);
+    hist.push(submissionData);
+    ls.set(HISTORY_KEY, hist);
+    setSubmitted(true);
+    setScreen("submitted");
+    showToast("Assessment submitted successfully!", "success");
+  }
+
   const completedCount = Object.keys(scores).length;
 
   if (!qbReady) return (
@@ -339,29 +472,49 @@ export default function App() {
         </div>
       )}
       {modal && <ModalDialog {...modal} onClose={() => setModal(null)} />}
-      {screen === "userlogin"  && <UserLogin onLogin={(u,p) => {
-        if (login(u,p)) setScreen("welcome"); else showToast("Invalid credentials","error");
+      {screen === "userlogin"  && <UserLogin onLogin={async (username, p) => {
+        const ok = await login(username, p);
+        if (ok) routeAfterLogin(username);
+        return ok;
       }} />}
-      {screen === "welcome"    && <Welcome user={user} completedCount={completedCount}
+      {screen === "companyprofile" && <CompanyProfile user={user} onSave={saveProfile} onLogout={logout} />}
+      {screen === "practiceconfig" && <PracticeConfig user={user} companyProfile={companyProfile}
+        onSave={savePracticeConfig} onBack={() => setScreen("companyprofile")} onLogout={logout} />}
+      {screen === "welcome"    && <Welcome user={user} completedCount={Object.keys(scores).filter(id=>selectedPractices.includes(id)).length}
+        totalCount={selectedPractices.length}
         onStart={() => setScreen("practices")} onLogout={logout}
         onAdmin={() => setScreen("adminlogin")} onReport={() => {
           const hist = ls.get(HISTORY_KEY,[]);
           setHistoryList(hist);
-          setReportData({ scores, dimScores, levels, username: user?.username, ts: Date.now() });
+          setReportData({ scores, dimScores, levels, username: user?.username, ts: Date.now(), companyProfile });
           setScreen("report");
-        }} scores={scores} />}
-      {screen === "adminlogin" && <AdminLogin onLogin={(u,p) => {
+        }} scores={scores} submitted={submitted} />}
+      {screen === "adminlogin" && <AdminLogin onLogin={async (u, p) => {
+        const ok = await login(u, p);
+        if (ok && user?.role === "admin") { setScreen("admindash"); return true; }
+        // fallback: check local store
         const users = ls.get(USERS_KEY,{});
         const u2 = users[u];
-        if (u2?.password===p && u2?.role==="admin") { setScreen("admindash"); }
-        else showToast("Admin credentials incorrect","error");
+        if (u2?.password===p && u2?.role==="admin") {
+          api.setToken(u, p);
+          setScreen("admindash"); return true;
+        }
+        showToast("Admin credentials incorrect","error"); return false;
       }} onBack={() => setScreen("welcome")} />}
-      {screen === "admindash"  && <AdminDashboard onBack={() => setScreen("welcome")} showToast={showToast} />}
+      {screen === "admindash"  && <AdminDashboard onBack={() => setScreen("welcome")}
+        showToast={showToast} />}
       {screen === "practices"  && <PracticeSelect scores={scores} dimScores={dimScores}
         onSelect={goAssess} onBack={() => setScreen("welcome")}
         user={user} onLogout={logout}
+        selectedPractices={selectedPractices}
+        submitted={submitted}
+        onFinalSubmit={() => setModal({
+          title: "Submit Assessment",
+          msg: "Once submitted, your answers cannot be changed. Are you sure you want to finalise this assessment?",
+          onOk: finalSubmit,
+        })}
         onReport={() => {
-          setReportData({ scores, dimScores, levels, username: user?.username, ts: Date.now() });
+          setReportData({ scores, dimScores, levels, username: user?.username, ts: Date.now(), companyProfile });
           setScreen("report");
         }} />}
       {screen === "assess"     && <AssessScreen
@@ -369,12 +522,19 @@ export default function App() {
         qb={qb} existingLevel={levels[selectedPractice]}
         existingAnswers={answers[selectedPractice]}
         onSubmit={submitAssessment} onBack={() => setScreen("practices")}
-        showToast={showToast} />}
+        showToast={showToast} readOnly={submitted} />}
+      {screen === "submitted"  && <SubmittedScreen user={user} scores={scores}
+        dimScores={dimScores} levels={levels} companyProfile={companyProfile}
+        selectedPractices={selectedPractices}
+        onLogout={logout} onReport={() => {
+          setReportData({ scores, dimScores, levels, username: user?.username, ts: Date.now(), companyProfile });
+          setScreen("report");
+        }} />}
       {screen === "report"     && <ReportView
         scores={scores} dimScores={dimScores} levels={levels}
         reportData={reportData} historyList={historyList}
         onBack={() => setScreen(user?.role==="admin"?"admindash":"practices")}
-        onLogout={logout} user={user} />}
+        onLogout={logout} user={user} companyProfile={companyProfile} />}
     </div>
   );
 }
@@ -401,8 +561,14 @@ function ModalDialog({ title, msg, onOk, onClose }) {
 /* ─── UserLogin ─────────────────────────────────────────────────── */
 function UserLogin({ onLogin }) {
   const [u, setU] = useState(""); const [p, setP] = useState("");
-  const [err, setErr] = useState("");
-  function handle() { if (!onLogin(u,p)) setErr("Invalid username or password."); }
+  const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
+  async function handle() {
+    if (!u.trim() || !p.trim()) { setErr("Enter username and password."); return; }
+    setLoading(true); setErr("");
+    const ok = await onLogin(u, p);
+    setLoading(false);
+    if (!ok) setErr("Invalid username or password.");
+  }
   return (
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:`linear-gradient(135deg,${TC} 0%,#001f5c 100%)`}}>
@@ -419,20 +585,22 @@ function UserLogin({ onLogin }) {
         <div style={{marginBottom:16}}>
           <label style={{fontSize:12,fontWeight:600,color:"#475569",display:"block",marginBottom:6}}>USERNAME</label>
           <input value={u} onChange={e=>setU(e.target.value)} placeholder="Enter username"
-            onKeyDown={e=>e.key==="Enter"&&handle()}
+            onKeyDown={e=>e.key==="Enter"&&handle()} disabled={loading}
             style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",
               fontSize:14,boxSizing:"border-box",outline:"none"}} />
         </div>
         <div style={{marginBottom:24}}>
           <label style={{fontSize:12,fontWeight:600,color:"#475569",display:"block",marginBottom:6}}>PASSWORD</label>
           <input type="password" value={p} onChange={e=>setP(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="Enter password"
+            onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="Enter password" disabled={loading}
             style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",
               fontSize:14,boxSizing:"border-box",outline:"none"}} />
         </div>
-        <button onClick={handle} style={{width:"100%",padding:"12px",borderRadius:8,border:"none",
-          background:TC,color:"#fff",fontSize:15,fontWeight:600,cursor:"pointer"}}>
-          Sign In
+        <button onClick={handle} disabled={loading}
+          style={{width:"100%",padding:"12px",borderRadius:8,border:"none",
+            background:loading?"#94a3b8":TC,color:"#fff",fontSize:15,fontWeight:600,
+            cursor:loading?"not-allowed":"pointer"}}>
+          {loading ? "Signing in…" : "Sign In"}
         </button>
         <p style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:20,marginBottom:0}}>
           ITIL 4 Process Maturity Assessment · {ORG_BRAND}
@@ -444,7 +612,15 @@ function UserLogin({ onLogin }) {
 
 /* ─── AdminLogin ────────────────────────────────────────────────── */
 function AdminLogin({ onLogin, onBack }) {
-  const [u,setU]=useState(""); const [p,setP]=useState(""); const [err,setErr]=useState("");
+  const [u,setU]=useState(""); const [p,setP]=useState("");
+  const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
+  async function handle() {
+    if (!u.trim()||!p.trim()) { setErr("Enter credentials."); return; }
+    setLoading(true); setErr("");
+    const ok = await onLogin(u, p);
+    setLoading(false);
+    if (!ok) setErr("Invalid admin credentials");
+  }
   return (
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:`linear-gradient(135deg,#1e1b4b 0%,#312e81 100%)`}}>
@@ -458,25 +634,27 @@ function AdminLogin({ onLogin, onBack }) {
           padding:"10px 14px",borderRadius:8,marginBottom:16,fontSize:13}}>{err}</div>}
         <div style={{marginBottom:16}}>
           <label style={{fontSize:12,fontWeight:600,color:"#475569",display:"block",marginBottom:6}}>ADMIN USERNAME</label>
-          <input value={u} onChange={e=>setU(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&(onLogin(u,p)||setErr("Invalid admin credentials"))}
+          <input value={u} onChange={e=>setU(e.target.value)} disabled={loading}
+            onKeyDown={e=>e.key==="Enter"&&handle()}
             style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",
               fontSize:14,boxSizing:"border-box"}} />
         </div>
         <div style={{marginBottom:24}}>
           <label style={{fontSize:12,fontWeight:600,color:"#475569",display:"block",marginBottom:6}}>PASSWORD</label>
-          <input type="password" value={p} onChange={e=>setP(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&(onLogin(u,p)||setErr("Invalid admin credentials"))}
+          <input type="password" value={p} onChange={e=>setP(e.target.value)} disabled={loading}
+            onKeyDown={e=>e.key==="Enter"&&handle()}
             style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",
               fontSize:14,boxSizing:"border-box"}} />
         </div>
-        <button onClick={()=>{if(!onLogin(u,p))setErr("Invalid admin credentials");}}
+        <button onClick={handle} disabled={loading}
           style={{width:"100%",padding:"12px",borderRadius:8,border:"none",
-            background:"#1e1b4b",color:"#fff",fontSize:15,fontWeight:600,cursor:"pointer",marginBottom:12}}>
-          Admin Sign In
+            background:loading?"#94a3b8":"#1e1b4b",color:"#fff",fontSize:15,fontWeight:600,
+            cursor:loading?"not-allowed":"pointer",marginBottom:12}}>
+          {loading ? "Signing in…" : "Admin Sign In"}
         </button>
-        <button onClick={onBack} style={{width:"100%",padding:"10px",borderRadius:8,
-          border:"1px solid #e2e8f0",background:"transparent",cursor:"pointer",fontSize:14,color:"#64748b"}}>
+        <button onClick={onBack} disabled={loading}
+          style={{width:"100%",padding:"10px",borderRadius:8,
+            border:"1px solid #e2e8f0",background:"transparent",cursor:"pointer",fontSize:14,color:"#64748b"}}>
           ← Back
         </button>
       </div>
@@ -486,118 +664,583 @@ function AdminLogin({ onLogin, onBack }) {
 
 /* ─── AdminDashboard ─────────────────────────────────────────────── */
 function AdminDashboard({ onBack, showToast }) {
-  const [tab, setTab] = useState("users");
-  const [users, setUsers] = useState(() => ls.get(USERS_KEY, {}));
-  const [newU,setNewU]=useState(""); const [newP,setNewP]=useState(""); const [newN,setNewN]=useState("");
+  const [tab,      setTab]      = useState("users");
+  const [users,    setUsers]    = useState(() => ls.get(USERS_KEY, {}));
+  const [newU,     setNewU]     = useState("");
+  const [newP,     setNewP]     = useState("");
+  const [newN,     setNewN]     = useState("");
+  const [saving,   setSaving]   = useState(false);   // create user busy
+  const [deleting, setDeleting] = useState(null);    // username being deleted
+  const [viewUser, setViewUser] = useState(null);    // filter for data/reports tab
+  // Cloud reports state
+  const [cloudReports,     setCloudReports]     = useState([]);
+  const [cloudLoading,     setCloudLoading]     = useState(false);
+  const [cloudErr,         setCloudErr]         = useState("");
+  const [deletingReport,   setDeletingReport]   = useState(null);
+  const [savingPdfFor,     setSavingPdfFor]     = useState(null); // username being cloud-saved
 
-  function addUser() {
+  // Reload users — try remote first, fall back to localStorage
+  async function reloadUsers() {
+    if (IS_VERCEL) {
+      const { ok, data } = await api.call("GET", "/api/users");
+      if (ok && data && typeof data === "object") {
+        // Merge with local so we have full records (remote strips passwords)
+        const local = ls.get(USERS_KEY, {});
+        const merged = {};
+        for (const [k, v] of Object.entries(data)) {
+          merged[k] = { ...local[k], ...v };
+        }
+        setUsers(merged);
+        return;
+      }
+    }
+    setUsers(ls.get(USERS_KEY, {}));
+  }
+  useEffect(() => { reloadUsers(); }, []);
+
+  // Load cloud reports when tab is opened
+  useEffect(() => {
+    if (tab !== "reports") return;
+    loadCloudReports();
+  }, [tab, viewUser]);
+
+  async function loadCloudReports() {
+    if (!IS_VERCEL) { setCloudErr("Cloud reports require a Vercel deployment."); return; }
+    setCloudLoading(true); setCloudErr("");
+    const path = viewUser
+      ? `/api/reports?username=${encodeURIComponent(viewUser)}`
+      : "/api/reports";
+    const { ok, data } = await api.call("GET", path);
+    setCloudLoading(false);
+    if (ok && Array.isArray(data)) { setCloudReports(data); }
+    else { setCloudErr("Could not load cloud reports. Check Vercel Blob is linked."); }
+  }
+
+  async function addUser() {
     if (!newU.trim() || !newP.trim()) { showToast("Username and password required","error"); return; }
-    const updated = { ...users, [newU.trim()]: { password: newP, name: newN||newU, role:"user" } };
-    ls.set(USERS_KEY, updated); setUsers(updated);
+    setSaving(true);
+    const username = newU.trim();
+
+    // ── Remote first ──
+    if (IS_VERCEL) {
+      const { ok, status, data } = await api.call("POST", "/api/users",
+        { username, password: newP, name: newN || username, role: "user" });
+      if (!ok) {
+        setSaving(false);
+        showToast(data?.error || `Failed to create user (HTTP ${status})`, "error");
+        return;
+      }
+    }
+
+    // ── Always mirror to localStorage (offline access + session restore) ──
+    const updated = {
+      ...ls.get(USERS_KEY, {}),
+      [username]: { password: newP, name: newN || username, role: "user" },
+    };
+    ls.set(USERS_KEY, updated);
+
+    setSaving(false);
     setNewU(""); setNewP(""); setNewN("");
-    showToast(`User '${newU}' created`,"success");
+    await reloadUsers();
+    showToast(`User '${username}' created${IS_VERCEL ? " (remote + local)" : " (local)"}`, "success");
   }
-  function deleteUser(u) {
-    if (u === "Admin") { showToast("Cannot delete Admin","error"); return; }
-    const updated = { ...users }; delete updated[u];
-    ls.set(USERS_KEY, updated); setUsers(updated);
-    showToast(`User '${u}' deleted`,"success");
+
+  async function deleteUser(username) {
+    if (username === "Admin") { showToast("Cannot delete Admin", "error"); return; }
+    setDeleting(username);
+
+    // ── Remote first ──
+    if (IS_VERCEL) {
+      const { ok, data } = await api.call("DELETE", `/api/users?username=${encodeURIComponent(username)}`);
+      if (!ok) {
+        setDeleting(null);
+        showToast(data?.error || "Failed to delete user remotely", "error");
+        return;
+      }
+    }
+
+    // ── Mirror locally ──
+    const updated = { ...ls.get(USERS_KEY, {}) };
+    delete updated[username];
+    ls.set(USERS_KEY, updated);
+
+    setDeleting(null);
+    await reloadUsers();
+    showToast(`User '${username}' deleted`, "success");
   }
-  function viewHistory(username) {
-    const all = ls.get(HISTORY_KEY, []);
-    const user_hist = all.filter(h=>h.username===username);
-    showToast(`${username}: ${user_hist.length} completed assessment(s)`,"info");
+
+  async function saveReportToCloud(h, cp) {
+    if (!IS_VERCEL) { showToast("Cloud save requires a Vercel deployment", "error"); return; }
+    setSavingPdfFor(h.username);
+    const html = generatePDFHTML({
+      scores:        h.scores    || {},
+      dimScores:     h.dimScores || {},
+      levels:        h.levels    || {},
+      username:      h.username,
+      ts:            h.ts,
+      companyProfile: cp,
+    });
+    const { ok, data } = await api.call("POST", "/api/reports", {
+      htmlContent:  html,
+      username:     h.username,
+      companyName:  cp?.companyName || h.username,
+      timestamp:    h.ts,
+    });
+    setSavingPdfFor(null);
+    if (ok) {
+      showToast("Report saved to cloud ✅", "success");
+    } else {
+      showToast(data?.error || "Cloud save failed", "error");
+    }
+  }
+
+  async function deleteCloudReport(pathname) {
+    setDeletingReport(pathname);
+    const { ok, data } = await api.call("DELETE", `/api/reports?pathname=${encodeURIComponent(pathname)}`);
+    setDeletingReport(null);
+    if (ok) {
+      showToast("Report deleted", "success");
+      setCloudReports(prev => prev.filter(r => r.pathname !== pathname));
+    } else {
+      showToast(data?.error || "Delete failed", "error");
+    }
   }
 
   const tabStyle = active => ({
-    padding:"8px 20px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:600,fontSize:13,
+    padding:"8px 20px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:600, fontSize:13,
     background: active ? TC : "transparent",
-    color: active ? "#fff" : "#64748b",
+    color:      active ? "#fff" : "#64748b",
   });
 
+  const inputStyle = {
+    flex:1, minWidth:120, padding:"10px 14px", borderRadius:8,
+    border:"1px solid #e2e8f0", fontSize:14,
+  };
+
   return (
-    <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
-      <div style={{background:TC,padding:"16px 24px",display:"flex",alignItems:"center",gap:16}}>
-        <div style={{width:36,height:36,borderRadius:8,background:"rgba(255,255,255,.15)",
-          display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚙️</div>
+    <div style={{minHeight:"100vh", background:"#f0f4f8"}}>
+      {/* Header */}
+      <div style={{background:TC, padding:"16px 24px", display:"flex", alignItems:"center", gap:16}}>
+        <div style={{width:36, height:36, borderRadius:8, background:"rgba(255,255,255,.15)",
+          display:"flex", alignItems:"center", justifyContent:"center", fontSize:18}}>⚙️</div>
         <div>
-          <div style={{color:"#fff",fontWeight:700,fontSize:16}}>Admin Dashboard</div>
-          <div style={{color:"rgba(255,255,255,.6)",fontSize:12}}>{TOOL_NAME} · {ORG_BRAND}</div>
+          <div style={{color:"#fff", fontWeight:700, fontSize:16}}>Admin Dashboard</div>
+          <div style={{color:"rgba(255,255,255,.6)", fontSize:12}}>
+            {TOOL_NAME} · {ORG_BRAND}
+            {IS_VERCEL &&
+              <span style={{marginLeft:8, background:"rgba(0,169,79,.3)", borderRadius:10,
+                padding:"2px 8px", fontSize:10, fontWeight:700}}>☁️ Cloud</span>}
+          </div>
         </div>
-        <button onClick={onBack} style={{marginLeft:"auto",padding:"8px 16px",borderRadius:8,
-          border:"1px solid rgba(255,255,255,.3)",background:"transparent",color:"#fff",
-          cursor:"pointer",fontSize:13}}>← Back</button>
+        <button onClick={onBack} style={{marginLeft:"auto", padding:"8px 16px", borderRadius:8,
+          border:"1px solid rgba(255,255,255,.3)", background:"transparent", color:"#fff",
+          cursor:"pointer", fontSize:13}}>← Back</button>
       </div>
-      <div style={{maxWidth:900,margin:"24px auto",padding:"0 16px"}}>
-        <div style={{background:"#fff",borderRadius:12,padding:6,display:"inline-flex",gap:4,marginBottom:24}}>
-          <button style={tabStyle(tab==="users")} onClick={()=>setTab("users")}>User Management</button>
-          <button style={tabStyle(tab==="data")}  onClick={()=>setTab("data")}>Assessment Data</button>
+
+      <div style={{maxWidth:960, margin:"24px auto", padding:"0 16px"}}>
+        {/* Tab bar */}
+        <div style={{background:"#fff", borderRadius:12, padding:6,
+          display:"inline-flex", gap:4, marginBottom:24}}>
+          <button style={tabStyle(tab==="users")}   onClick={()=>setTab("users")}>
+            👥 Users
+          </button>
+          <button style={tabStyle(tab==="data")}    onClick={()=>setTab("data")}>
+            📋 Assessments
+          </button>
+          <button style={tabStyle(tab==="reports")} onClick={()=>setTab("reports")}>
+            ☁️ Cloud Reports
+          </button>
         </div>
+
+        {/* ══════════ USERS TAB ══════════ */}
         {tab === "users" && (
           <div>
-            <div style={{background:"#fff",borderRadius:12,padding:24,marginBottom:20,
+            {/* Create user */}
+            <div style={{background:"#fff", borderRadius:12, padding:24, marginBottom:20,
               boxShadow:"0 1px 4px rgba(0,0,0,.08)"}}>
-              <h3 style={{margin:"0 0 20px",color:TC,fontSize:16}}>Create New User</h3>
-              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-                <input value={newU} onChange={e=>setNewU(e.target.value)} placeholder="Username"
-                  style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:14}} />
-                <input value={newN} onChange={e=>setNewN(e.target.value)} placeholder="Display Name"
-                  style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:14}} />
-                <input type="password" value={newP} onChange={e=>setNewP(e.target.value)} placeholder="Password"
-                  style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",fontSize:14}} />
-                <button onClick={addUser} style={{padding:"10px 20px",borderRadius:8,border:"none",
-                  background:TCG,color:"#fff",fontWeight:600,cursor:"pointer"}}>Add User</button>
+              <h3 style={{margin:"0 0 8px", color:TC, fontSize:16}}>Create New User</h3>
+              <p style={{margin:"0 0 16px", fontSize:13, color:"#64748b"}}>
+                {IS_VERCEL
+                  ? "User is saved to Vercel KV (cloud) and mirrored locally."
+                  : "⚠️ Running locally — user saved to localStorage only. Deploy to Vercel for cloud storage."}
+              </p>
+              <div style={{display:"flex", gap:12, flexWrap:"wrap"}}>
+                <input value={newU} onChange={e=>setNewU(e.target.value)}
+                  placeholder="Username *" style={inputStyle} />
+                <input value={newN} onChange={e=>setNewN(e.target.value)}
+                  placeholder="Display Name" style={inputStyle} />
+                <input type="password" value={newP} onChange={e=>setNewP(e.target.value)}
+                  placeholder="Password *" style={inputStyle} />
+                <button onClick={addUser} disabled={saving}
+                  style={{padding:"10px 20px", borderRadius:8, border:"none",
+                    background:saving?"#94a3b8":TCG, color:"#fff",
+                    fontWeight:600, cursor:saving?"not-allowed":"pointer", whiteSpace:"nowrap"}}>
+                  {saving ? "Creating…" : IS_VERCEL ? "☁️ Add User" : "+ Add User"}
+                </button>
               </div>
             </div>
-            <div style={{background:"#fff",borderRadius:12,padding:24,boxShadow:"0 1px 4px rgba(0,0,0,.08)"}}>
-              <h3 style={{margin:"0 0 16px",color:TC,fontSize:16}}>All Users ({Object.keys(users).length})</h3>
-              {Object.entries(users).map(([un, ud]) => (
-                <div key={un} style={{display:"flex",alignItems:"center",padding:"12px 0",
-                  borderBottom:"1px solid #f1f5f9"}}>
-                  <div style={{width:36,height:36,borderRadius:"50%",background:un==="Admin"?"#1e1b4b":TC,
-                    color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",
-                    fontWeight:700,fontSize:14,marginRight:12}}>
-                    {(ud.name||un)[0].toUpperCase()}
+
+            {/* User list */}
+            <div style={{background:"#fff", borderRadius:12, padding:24,
+              boxShadow:"0 1px 4px rgba(0,0,0,.08)"}}>
+              <div style={{display:"flex", justifyContent:"space-between", alignItems:"center",
+                marginBottom:16}}>
+                <h3 style={{margin:0, color:TC, fontSize:16}}>
+                  All Users ({Object.keys(users).length})
+                </h3>
+                <button onClick={reloadUsers}
+                  style={{padding:"6px 14px", borderRadius:8, border:"1px solid #e2e8f0",
+                    background:"#f8fafc", cursor:"pointer", fontSize:12, color:"#64748b"}}>
+                  ↻ Refresh
+                </button>
+              </div>
+              {Object.entries(users).map(([un, ud]) => {
+                const isSubmitted = ls.get(`${SUBMIT_KEY}_${un}`);
+                const profile     = ls.get(`${PROFILE_KEY}_${un}`);
+                const isDeleting  = deleting === un;
+                return (
+                  <div key={un} style={{display:"flex", alignItems:"center", padding:"12px 0",
+                    borderBottom:"1px solid #f1f5f9", flexWrap:"wrap", gap:8}}>
+                    <div style={{width:36, height:36, borderRadius:"50%",
+                      background:un==="Admin"?"#1e1b4b":TC, color:"#fff",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      fontWeight:700, fontSize:14, marginRight:12, flexShrink:0}}>
+                      {(ud.name||un)[0].toUpperCase()}
+                    </div>
+                    <div style={{flex:1, minWidth:160}}>
+                      <div style={{fontWeight:600, color:"#1e293b", fontSize:14}}>
+                        {ud.name || un}
+                      </div>
+                      <div style={{fontSize:12, color:"#94a3b8"}}>
+                        @{un} · {ud.role}
+                        {profile && ` · ${profile.companyName}`}
+                        {isSubmitted &&
+                          <span style={{marginLeft:6, color:"#15803d", fontWeight:700}}>
+                            ✅ Submitted
+                          </span>}
+                      </div>
+                    </div>
+                    {un !== "Admin" && (
+                      <>
+                        <button onClick={()=>{ setViewUser(un); setTab("data"); }}
+                          style={{padding:"6px 12px", borderRadius:6,
+                            border:"1px solid #e2e8f0", background:"transparent",
+                            cursor:"pointer", fontSize:12, color:"#475569"}}>
+                          📋 View
+                        </button>
+                        <button onClick={()=>{ setViewUser(un); setTab("reports"); }}
+                          style={{padding:"6px 12px", borderRadius:6,
+                            border:"1px solid #e2e8f0", background:"transparent",
+                            cursor:"pointer", fontSize:12, color:"#475569"}}>
+                          ☁️ Reports
+                        </button>
+                        <button onClick={()=>deleteUser(un)} disabled={isDeleting}
+                          style={{padding:"6px 12px", borderRadius:6,
+                            border:"none", background:"#fef2f2", color:TCR,
+                            cursor:isDeleting?"not-allowed":"pointer",
+                            fontSize:12, fontWeight:600}}>
+                          {isDeleting ? "…" : "Delete"}
+                        </button>
+                      </>
+                    )}
                   </div>
-                  <div style={{flex:1}}>
-                    <div style={{fontWeight:600,color:"#1e293b",fontSize:14}}>{ud.name||un}</div>
-                    <div style={{fontSize:12,color:"#94a3b8"}}>@{un} · {ud.role}</div>
-                  </div>
-                  <button onClick={()=>viewHistory(un)} style={{padding:"6px 12px",borderRadius:6,
-                    border:"1px solid #e2e8f0",background:"transparent",cursor:"pointer",fontSize:12,
-                    color:"#475569",marginRight:8}}>History</button>
-                  {un !== "Admin" && (
-                    <button onClick={()=>deleteUser(un)} style={{padding:"6px 12px",borderRadius:6,
-                      border:"none",background:"#fef2f2",color:TCR,cursor:"pointer",fontSize:12,fontWeight:600}}>
-                      Delete
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
+
+        {/* ══════════ ASSESSMENTS TAB ══════════ */}
         {tab === "data" && (
-          <div style={{background:"#fff",borderRadius:12,padding:24,boxShadow:"0 1px 4px rgba(0,0,0,.08)"}}>
-            <h3 style={{margin:"0 0 16px",color:TC,fontSize:16}}>Assessment History</h3>
+          <div>
+            {/* User filter pills */}
+            <div style={{background:"#fff", borderRadius:12, padding:16, marginBottom:16,
+              boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+              <div style={{fontSize:13, fontWeight:600, color:"#475569", marginBottom:10}}>
+                Filter by user
+              </div>
+              <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+                <button onClick={()=>setViewUser(null)}
+                  style={{padding:"7px 14px", borderRadius:8,
+                    border:`1px solid ${!viewUser?TC:"#e2e8f0"}`,
+                    background:!viewUser?TC:"#fff",
+                    color:!viewUser?"#fff":"#475569",
+                    fontWeight:600, fontSize:13, cursor:"pointer"}}>
+                  All
+                </button>
+                {Object.keys(users)
+                  .filter(u => u !== "Admin" && ls.get(`${SUBMIT_KEY}_${u}`))
+                  .map(un => (
+                    <button key={un} onClick={()=>setViewUser(un)}
+                      style={{padding:"7px 14px", borderRadius:8,
+                        border:`1px solid ${viewUser===un?TC:"#e2e8f0"}`,
+                        background:viewUser===un?TC:"#fff",
+                        color:viewUser===un?"#fff":"#475569",
+                        fontWeight:600, fontSize:13, cursor:"pointer"}}>
+                      {users[un]?.name || un}
+                    </button>
+                  ))}
+              </div>
+            </div>
+
+            {/* Submission cards */}
             {(() => {
-              const all = ls.get(HISTORY_KEY,[]);
-              if (!all.length) return <p style={{color:"#94a3b8",textAlign:"center",padding:40}}>No assessments submitted yet.</p>;
-              return all.slice().reverse().map((h,i) => (
-                <div key={i} style={{padding:"14px 0",borderBottom:"1px solid #f1f5f9"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:12}}>
-                    <div style={{fontWeight:600,color:"#1e293b"}}>{h.username}</div>
-                    <div style={{fontSize:12,color:"#94a3b8"}}>{new Date(h.ts).toLocaleString()}</div>
-                    <div style={{marginLeft:"auto",fontSize:12,color:maturityColor(h.avgScore),fontWeight:700}}>
-                      Avg {h.avgScore?.toFixed(1)} — {maturityLabel(h.avgScore)}
+              const all      = ls.get(HISTORY_KEY, []);
+              const filtered = viewUser
+                ? all.filter(h => h.username === viewUser)
+                : all;
+              const sorted   = filtered.slice().reverse();
+              if (!sorted.length) return (
+                <div style={{background:"#fff", borderRadius:12, padding:60, textAlign:"center",
+                  boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+                  <div style={{fontSize:40, marginBottom:12}}>📭</div>
+                  <div style={{color:"#94a3b8"}}>No submitted assessments yet.</div>
+                </div>
+              );
+              return sorted.map((h, i) => {
+                const submissionData = ls.get(`${SUBMISSION_KEY}_${h.username}`) || h;
+                const cp = submissionData.companyProfile || h.companyProfile;
+                const isSavingThis = savingPdfFor === h.username;
+                return (
+                  <div key={i} style={{background:"#fff", borderRadius:12, padding:24,
+                    marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+                    <div style={{display:"flex", alignItems:"flex-start",
+                      gap:16, flexWrap:"wrap"}}>
+                      <div style={{flex:1, minWidth:200}}>
+                        {/* User + timestamp row */}
+                        <div style={{display:"flex", alignItems:"center",
+                          gap:10, marginBottom:8}}>
+                          <div style={{width:32, height:32, borderRadius:"50%",
+                            background:TC, color:"#fff",
+                            display:"flex", alignItems:"center", justifyContent:"center",
+                            fontWeight:700, fontSize:13}}>
+                            {(users[h.username]?.name||h.username||"?")[0].toUpperCase()}
+                          </div>
+                          <div>
+                            <div style={{fontWeight:700, color:"#1e293b", fontSize:14}}>
+                              {users[h.username]?.name || h.username}
+                            </div>
+                            <div style={{fontSize:11, color:"#94a3b8"}}>
+                              {new Date(h.ts).toLocaleString("en-GB")}
+                            </div>
+                          </div>
+                          <div style={{marginLeft:"auto", padding:"4px 10px",
+                            borderRadius:20, background:"#dcfce7",
+                            color:"#15803d", fontSize:11, fontWeight:700}}>
+                            ✅ Submitted
+                          </div>
+                        </div>
+                        {/* Company row */}
+                        {cp && (
+                          <div style={{background:"#f8fafc", borderRadius:8,
+                            padding:"10px 14px", fontSize:12,
+                            color:"#475569", marginBottom:10}}>
+                            <strong>{cp.companyName}</strong>
+                            {" · "}{cp.industry}
+                            {" · "}{cp.employeeStrength} employees
+                            {cp.itsmTools?.length > 0 &&
+                              ` · ${cp.itsmTools.join(", ")}`}
+                          </div>
+                        )}
+                        {/* Score chips */}
+                        <div style={{display:"flex", gap:12, flexWrap:"wrap"}}>
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontSize:22, fontWeight:800,
+                              color:maturityColor(h.avgScore)}}>
+                              {h.avgScore?.toFixed(2) || "—"}
+                            </div>
+                            <div style={{fontSize:10, color:"#94a3b8"}}>Overall</div>
+                          </div>
+                          {DIM_KEYS.map(dk => {
+                            const vals = Object.values(h.dimScores||{})
+                              .map(d => d[dk]).filter(v => v != null);
+                            const avg = vals.length
+                              ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+                            return avg != null ? (
+                              <div key={dk} style={{textAlign:"center"}}>
+                                <div style={{fontSize:16, fontWeight:700,
+                                  color:DIMS[dk].color}}>
+                                  {avg.toFixed(1)}
+                                </div>
+                                <div style={{fontSize:10, color:"#94a3b8"}}>{dk}</div>
+                              </div>
+                            ) : null;
+                          })}
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontSize:16, fontWeight:700,
+                              color:"#64748b"}}>
+                              {h.completedCount}
+                            </div>
+                            <div style={{fontSize:10, color:"#94a3b8"}}>practices</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div style={{display:"flex", flexDirection:"column",
+                        gap:8, alignSelf:"center", flexShrink:0}}>
+                        {/* Print locally */}
+                        <button
+                          onClick={()=>printReport({
+                            scores:        h.scores    || {},
+                            dimScores:     h.dimScores || {},
+                            levels:        h.levels    || {},
+                            username:      h.username,
+                            ts:            h.ts,
+                            companyProfile: cp,
+                          })}
+                          style={{padding:"9px 18px", borderRadius:8, border:"none",
+                            background:TC, color:"#fff", fontWeight:700,
+                            cursor:"pointer", fontSize:13}}>
+                          🖨️ Print PDF
+                        </button>
+                        {/* Save to cloud */}
+                        {IS_VERCEL && (
+                          <button
+                            onClick={()=>saveReportToCloud(h, cp)}
+                            disabled={isSavingThis}
+                            style={{padding:"9px 18px", borderRadius:8,
+                              border:`1px solid ${TCL}`,
+                              background:isSavingThis?"#f1f5f9":"#fff",
+                              color:isSavingThis?"#94a3b8":TCL,
+                              fontWeight:700, cursor:isSavingThis?"not-allowed":"pointer",
+                              fontSize:13}}>
+                            {isSavingThis ? "Saving…" : "☁️ Save to Cloud"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div style={{fontSize:12,color:"#64748b",marginTop:4}}>
-                    {h.completedCount} practices assessed
+                );
+              });
+            })()}
+          </div>
+        )}
+
+        {/* ══════════ CLOUD REPORTS TAB ══════════ */}
+        {tab === "reports" && (
+          <div>
+            {/* Filter + refresh row */}
+            <div style={{background:"#fff", borderRadius:12, padding:16,
+              marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+              <div style={{display:"flex", justifyContent:"space-between",
+                alignItems:"center", flexWrap:"wrap", gap:12}}>
+                <div>
+                  <div style={{fontSize:14, fontWeight:700, color:TC, marginBottom:4}}>
+                    ☁️ Cloud-Saved Reports (Vercel Blob)
+                  </div>
+                  <div style={{fontSize:12, color:"#64748b"}}>
+                    {IS_VERCEL
+                      ? "Reports are stored as HTML files in Vercel Blob and accessible via permanent URLs."
+                      : "⚠️ Cloud reports are only available on Vercel deployments."}
                   </div>
                 </div>
-              ));
-            })()}
+                <div style={{display:"flex", gap:8}}>
+                  <button onClick={()=>setViewUser(null)}
+                    style={{padding:"7px 14px", borderRadius:8,
+                      border:`1px solid ${!viewUser?TC:"#e2e8f0"}`,
+                      background:!viewUser?TC:"#fff",
+                      color:!viewUser?"#fff":"#475569",
+                      fontWeight:600, fontSize:13, cursor:"pointer"}}>
+                    All
+                  </button>
+                  {Object.keys(users).filter(u=>u!=="Admin").map(un=>(
+                    <button key={un} onClick={()=>setViewUser(un)}
+                      style={{padding:"7px 14px", borderRadius:8,
+                        border:`1px solid ${viewUser===un?TC:"#e2e8f0"}`,
+                        background:viewUser===un?TC:"#fff",
+                        color:viewUser===un?"#fff":"#475569",
+                        fontWeight:600, fontSize:13, cursor:"pointer"}}>
+                      {users[un]?.name||un}
+                    </button>
+                  ))}
+                  <button onClick={loadCloudReports} disabled={cloudLoading}
+                    style={{padding:"7px 14px", borderRadius:8,
+                      border:"1px solid #e2e8f0", background:"#f8fafc",
+                      cursor:"pointer", fontSize:13, color:"#64748b"}}>
+                    {cloudLoading ? "Loading…" : "↻ Refresh"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Error */}
+            {cloudErr && (
+              <div style={{background:"#fef2f2", border:"1px solid #fecaca",
+                borderRadius:10, padding:"14px 18px", marginBottom:16,
+                color:"#dc2626", fontSize:13}}>
+                ⚠️ {cloudErr}
+              </div>
+            )}
+
+            {/* Loading skeleton */}
+            {cloudLoading && !cloudErr && (
+              <div style={{background:"#fff", borderRadius:12, padding:40,
+                textAlign:"center", boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+                <div style={{fontSize:28, marginBottom:12}}>☁️</div>
+                <div style={{color:"#94a3b8", fontSize:14}}>Loading reports from Vercel Blob…</div>
+              </div>
+            )}
+
+            {/* Report cards */}
+            {!cloudLoading && !cloudErr && cloudReports.length === 0 && (
+              <div style={{background:"#fff", borderRadius:12, padding:60,
+                textAlign:"center", boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+                <div style={{fontSize:40, marginBottom:12}}>📭</div>
+                <div style={{color:"#94a3b8"}}>
+                  No cloud reports yet. Use "☁️ Save to Cloud" in the Assessments tab.
+                </div>
+              </div>
+            )}
+
+            {!cloudLoading && cloudReports.map((r, i) => (
+              <div key={i} style={{background:"#fff", borderRadius:12, padding:20,
+                marginBottom:12, boxShadow:"0 1px 4px rgba(0,0,0,.06)",
+                display:"flex", alignItems:"center", gap:16, flexWrap:"wrap"}}>
+                <div style={{width:40, height:40, borderRadius:10,
+                  background:"#f1f5f9", display:"flex", alignItems:"center",
+                  justifyContent:"center", fontSize:20, flexShrink:0}}>
+                  📄
+                </div>
+                <div style={{flex:1, minWidth:180}}>
+                  <div style={{fontWeight:700, color:"#1e293b", fontSize:14}}>
+                    {r.filename?.replace(".html","") || r.pathname}
+                  </div>
+                  <div style={{fontSize:12, color:"#94a3b8", marginTop:2}}>
+                    User: <strong>{r.username}</strong>
+                    {" · "}
+                    {new Date(r.savedAt).toLocaleString("en-GB")}
+                    {" · "}
+                    {r.size ? `${Math.round(r.size/1024)} KB` : ""}
+                  </div>
+                </div>
+                <div style={{display:"flex", gap:8, flexShrink:0}}>
+                  <a href={r.url} target="_blank" rel="noreferrer"
+                    style={{padding:"8px 16px", borderRadius:8,
+                      background:TC, color:"#fff", fontWeight:700,
+                      fontSize:13, textDecoration:"none", display:"inline-block"}}>
+                    🔗 Open
+                  </a>
+                  <button
+                    onClick={()=>navigator.clipboard?.writeText(r.url).then(()=>
+                      showToast("URL copied!", "success"))}
+                    style={{padding:"8px 14px", borderRadius:8,
+                      border:"1px solid #e2e8f0", background:"#fff",
+                      cursor:"pointer", fontSize:13, color:"#475569"}}>
+                    📋 Copy URL
+                  </button>
+                  <button
+                    onClick={()=>deleteCloudReport(r.pathname)}
+                    disabled={deletingReport === r.pathname}
+                    style={{padding:"8px 14px", borderRadius:8, border:"none",
+                      background:"#fef2f2", color:TCR,
+                      cursor:deletingReport===r.pathname?"not-allowed":"pointer",
+                      fontSize:13, fontWeight:600}}>
+                    {deletingReport===r.pathname ? "…" : "🗑️"}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -606,9 +1249,9 @@ function AdminDashboard({ onBack, showToast }) {
 }
 
 /* ─── Welcome ───────────────────────────────────────────────────── */
-function Welcome({ user, completedCount, onStart, onLogout, onAdmin, onReport, scores }) {
+function Welcome({ user, completedCount, totalCount, onStart, onLogout, onAdmin, onReport, scores, submitted }) {
   const avgScore = completedCount > 0
-    ? Object.values(scores).reduce((a,b)=>a+b,0) / completedCount : 0;
+    ? Object.values(scores).reduce((a,b)=>a+b,0) / Object.values(scores).length : 0;
 
   return (
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${TC} 0%,#001f5c 100%)`,
@@ -627,7 +1270,7 @@ function Welcome({ user, completedCount, onStart, onLogout, onAdmin, onReport, s
             display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div>
               <div style={{color:"rgba(255,255,255,.6)",fontSize:12}}>Practices Assessed</div>
-              <div style={{color:"#fff",fontSize:22,fontWeight:700}}>{completedCount} / {PRACTICES.length}</div>
+              <div style={{color:"#fff",fontSize:22,fontWeight:700}}>{completedCount} / {totalCount}</div>
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{color:"rgba(255,255,255,.6)",fontSize:12}}>Average Score</div>
@@ -635,10 +1278,18 @@ function Welcome({ user, completedCount, onStart, onLogout, onAdmin, onReport, s
             </div>
           </div>
         )}
-        <button onClick={onStart} style={{width:"100%",padding:"14px",borderRadius:10,border:"none",
-          background:"#fff",color:TC,fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:12}}>
-          {completedCount>0 ? "Continue Assessment →" : "Start Assessment →"}
-        </button>
+        {submitted ? (
+          <div style={{background:"rgba(0,169,79,.2)",border:"1px solid rgba(0,169,79,.4)",
+            borderRadius:10,padding:"12px 16px",marginBottom:16,textAlign:"center"}}>
+            <div style={{color:"#4ade80",fontWeight:700,fontSize:14}}>✅ Assessment Submitted</div>
+            <div style={{color:"rgba(255,255,255,.6)",fontSize:12,marginTop:4}}>Your responses are locked</div>
+          </div>
+        ) : (
+          <button onClick={onStart} style={{width:"100%",padding:"14px",borderRadius:10,border:"none",
+            background:"#fff",color:TC,fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:12}}>
+            {completedCount>0 ? "Continue Assessment →" : "Start Assessment →"}
+          </button>
+        )}
         {completedCount>0 && (
           <button onClick={onReport} style={{width:"100%",padding:"12px",borderRadius:10,
             border:"1px solid rgba(255,255,255,.4)",background:"transparent",color:"#fff",
@@ -662,14 +1313,20 @@ function Welcome({ user, completedCount, onStart, onLogout, onAdmin, onReport, s
 }
 
 /* ─── PracticeSelect ─────────────────────────────────────────────── */
-function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, onReport }) {
+function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, onReport,
+  selectedPractices, submitted, onFinalSubmit }) {
   const [filter, setFilter] = useState("All");
-  const completedCount = Object.keys(scores).length;
-  const avgScore = completedCount > 0
-    ? Object.values(scores).reduce((a,b)=>a+b,0) / completedCount : 0;
+
+  // Only show practices the user chose
+  const activePractices = PRACTICES.filter(p => selectedPractices.includes(p.id));
+  const completedIds    = activePractices.filter(p => scores[p.id] != null).map(p => p.id);
+  const completedCount  = completedIds.length;
+  const avgScore        = completedCount > 0
+    ? completedIds.reduce((s,id)=>s+scores[id],0) / completedCount : 0;
+  const allDone         = completedCount === activePractices.length && activePractices.length > 0;
 
   const groupOptions = ["All", ...GROUPS];
-  const visible = filter==="All" ? PRACTICES : PRACTICES.filter(p=>p.group===filter);
+  const visibleGroup = filter === "All" ? activePractices : activePractices.filter(p=>p.group===filter);
 
   return (
     <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
@@ -680,7 +1337,10 @@ function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, o
           color:"#fff",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:13}}>← Home</button>
         <div style={{flex:1}}>
           <div style={{color:"#fff",fontWeight:700,fontSize:15}}>{TOOL_NAME}</div>
-          <div style={{color:"rgba(255,255,255,.6)",fontSize:11}}>{completedCount}/{PRACTICES.length} practices · Avg {avgScore>0?avgScore.toFixed(1):"—"}</div>
+          <div style={{color:"rgba(255,255,255,.6)",fontSize:11}}>
+            {completedCount}/{activePractices.length} practices · Avg {avgScore>0?avgScore.toFixed(1):"—"}
+            {submitted && " · 🔒 Submitted"}
+          </div>
         </div>
         {completedCount>0 && (
           <button onClick={onReport} style={{padding:"7px 14px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
@@ -691,17 +1351,50 @@ function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, o
       </div>
 
       <div style={{maxWidth:1100,margin:"24px auto",padding:"0 16px"}}>
+        {/* Submitted banner */}
+        {submitted && (
+          <div style={{background:"#dcfce7",border:"1px solid #86efac",borderRadius:12,
+            padding:"16px 20px",marginBottom:20,display:"flex",alignItems:"center",gap:12}}>
+            <div style={{fontSize:24}}>🔒</div>
+            <div>
+              <div style={{fontWeight:700,color:"#15803d",fontSize:15}}>Assessment Submitted & Locked</div>
+              <div style={{fontSize:13,color:"#166534"}}>Your answers are read-only. Contact your assessor to re-open.</div>
+            </div>
+          </div>
+        )}
+
         {/* Progress bar */}
         <div style={{background:"#fff",borderRadius:12,padding:"20px 24px",marginBottom:20,
           boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
             <span style={{fontWeight:700,color:TC,fontSize:15}}>Assessment Progress</span>
-            <span style={{fontSize:13,color:"#64748b"}}>{completedCount} of {PRACTICES.length} completed</span>
+            <span style={{fontSize:13,color:"#64748b"}}>{completedCount} of {activePractices.length} completed</span>
           </div>
           <div style={{background:"#f1f5f9",borderRadius:999,height:8,overflow:"hidden"}}>
             <div style={{height:"100%",background:`linear-gradient(90deg,${TCG},${TCL})`,
-              width:`${(completedCount/PRACTICES.length)*100}%`,transition:"width .4s ease",borderRadius:999}}/>
+              width:`${activePractices.length>0?(completedCount/activePractices.length)*100:0}%`,
+              transition:"width .4s ease",borderRadius:999}}/>
           </div>
+          {/* Final Submit button — BUG 2 */}
+          {!submitted && completedCount > 0 && (
+            <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid #f1f5f9",
+              display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+              <div>
+                <div style={{fontWeight:600,color:"#334155",fontSize:13}}>
+                  {allDone ? "All selected practices complete — ready to finalise!" : `${activePractices.length - completedCount} practice(s) still pending`}
+                </div>
+                <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>
+                  Final submission locks all answers permanently
+                </div>
+              </div>
+              <button onClick={onFinalSubmit}
+                style={{padding:"10px 24px",borderRadius:10,border:"none",fontWeight:700,fontSize:14,
+                  cursor:"pointer",background:allDone?TCR:"#f97316",color:"#fff",
+                  boxShadow:`0 4px 12px ${allDone?TCR+"66":"#f9731666"}`}}>
+                🚀 Final Submit Assessment
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Group filter */}
@@ -718,18 +1411,25 @@ function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, o
 
         {/* Practices grid */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
-          {visible.map(p => {
+          {visibleGroup.map(p => {
             const sc  = scores[p.id];
             const dim = dimScores[p.id];
             const done = sc != null;
             return (
-              <div key={p.id} onClick={()=>onSelect(p.id)}
-                style={{background:"#fff",borderRadius:12,padding:20,cursor:"pointer",
-                  boxShadow:"0 1px 4px rgba(0,0,0,.06)",border:`2px solid ${done?maturityColor(sc):"#e2e8f0"}`,
-                  transition:"all .2s",position:"relative",overflow:"hidden"}}
-                onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"}
+              <div key={p.id}
+                onClick={submitted ? undefined : ()=>onSelect(p.id)}
+                style={{background:"#fff",borderRadius:12,padding:20,
+                  cursor: submitted ? "default" : "pointer",
+                  boxShadow:"0 1px 4px rgba(0,0,0,.06)",
+                  border:`2px solid ${done?maturityColor(sc):"#e2e8f0"}`,
+                  transition:"all .2s",position:"relative",overflow:"hidden",
+                  opacity: submitted && !done ? 0.7 : 1}}
+                onMouseEnter={e=>{ if(!submitted) e.currentTarget.style.transform="translateY(-2px)"; }}
                 onMouseLeave={e=>e.currentTarget.style.transform="translateY(0)"}>
-                {done && (
+                {submitted && (
+                  <div style={{position:"absolute",top:8,right:8,fontSize:14}}>🔒</div>
+                )}
+                {done && !submitted && (
                   <div style={{position:"absolute",top:0,right:0,width:0,height:0,
                     borderStyle:"solid",borderWidth:"0 40px 40px 0",
                     borderColor:`transparent ${maturityColor(sc)} transparent transparent`}}>
@@ -755,8 +1455,11 @@ function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, o
                     </div>
                   </>
                 )}
-                {!done && (
+                {!done && !submitted && (
                   <div style={{fontSize:12,color:"#94a3b8",marginTop:6}}>Click to assess →</div>
+                )}
+                {!done && submitted && (
+                  <div style={{fontSize:12,color:"#94a3b8",marginTop:6}}>Not assessed</div>
                 )}
               </div>
             );
@@ -767,8 +1470,377 @@ function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, o
   );
 }
 
-/* ─── AssessScreen (branching engine) ───────────────────────────── */
-function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, onBack, showToast }) {
+/* ─── CompanyProfile (BUG 5) ─────────────────────────────────────── */
+function CompanyProfile({ user, onSave, onLogout }) {
+  const [companyName, setCompanyName] = useState("");
+  const [industry,    setIndustry]    = useState("");
+  const [empSize,     setEmpSize]     = useState("");
+  const [tools,       setTools]       = useState([]);
+  const [err,         setErr]         = useState("");
+
+  function toggleTool(t) {
+    setTools(prev => prev.includes(t) ? prev.filter(x=>x!==t) : [...prev, t]);
+  }
+  function handleSave() {
+    if (!companyName.trim()) { setErr("Company Name is required."); return; }
+    if (!industry)            { setErr("Please select an Industry."); return; }
+    if (!empSize)             { setErr("Please select Employee Strength."); return; }
+    onSave({ companyName: companyName.trim(), industry, employeeStrength: empSize, itsmTools: tools });
+  }
+
+  const inputStyle = {
+    width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",
+    fontSize:14,boxSizing:"border-box",outline:"none",
+  };
+  const labelStyle = { fontSize:12,fontWeight:600,color:"#475569",display:"block",marginBottom:6 };
+
+  return (
+    <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${TC} 0%,#001f5c 100%)`,
+      display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{background:"#fff",borderRadius:20,padding:40,width:"100%",maxWidth:560,
+        boxShadow:"0 20px 60px rgba(0,0,0,.35)"}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{width:60,height:60,borderRadius:14,background:TC,display:"flex",
+            alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:28}}>🏢</div>
+          <div style={{fontSize:20,fontWeight:700,color:TC}}>Company Profile</div>
+          <div style={{fontSize:13,color:"#94a3b8",marginTop:4}}>
+            Tell us about your organisation · {user?.name || user?.username}
+          </div>
+        </div>
+
+        {err && (
+          <div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",
+            padding:"10px 14px",borderRadius:8,marginBottom:16,fontSize:13}}>{err}</div>
+        )}
+
+        <div style={{marginBottom:18}}>
+          <label style={labelStyle}>COMPANY NAME <span style={{color:TCR}}>*</span></label>
+          <input value={companyName} onChange={e=>{ setCompanyName(e.target.value); setErr(""); }}
+            placeholder="e.g. Acme Corporation" style={inputStyle} />
+        </div>
+
+        <div style={{marginBottom:18}}>
+          <label style={labelStyle}>INDUSTRY / SECTOR <span style={{color:TCR}}>*</span></label>
+          <select value={industry} onChange={e=>{ setIndustry(e.target.value); setErr(""); }}
+            style={{...inputStyle,color:industry?"#1e293b":"#94a3b8"}}>
+            <option value="">Select industry…</option>
+            {INDUSTRIES.map(i=><option key={i} value={i}>{i}</option>)}
+          </select>
+        </div>
+
+        <div style={{marginBottom:18}}>
+          <label style={labelStyle}>EMPLOYEE STRENGTH <span style={{color:TCR}}>*</span></label>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {EMP_SIZES.map(s => (
+              <button key={s} onClick={()=>{ setEmpSize(s); setErr(""); }}
+                style={{padding:"8px 18px",borderRadius:8,border:`2px solid ${empSize===s?TC:"#e2e8f0"}`,
+                  background:empSize===s?TC:"#fff",color:empSize===s?"#fff":"#475569",
+                  fontWeight:600,fontSize:13,cursor:"pointer",transition:"all .15s"}}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:28}}>
+          <label style={labelStyle}>ITSM TOOLS USED (select all that apply)</label>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {ITSM_TOOLS.map(t => (
+              <button key={t} onClick={()=>toggleTool(t)}
+                style={{padding:"7px 14px",borderRadius:8,border:`2px solid ${tools.includes(t)?TCL:"#e2e8f0"}`,
+                  background:tools.includes(t)?TCL+"22":"#fff",
+                  color:tools.includes(t)?TCL:"#475569",
+                  fontWeight:600,fontSize:12,cursor:"pointer",transition:"all .15s"}}>
+                {tools.includes(t) ? "✓ " : ""}{t}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button onClick={handleSave}
+          style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:TC,
+            color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:12}}>
+          Continue to Practice Selection →
+        </button>
+        <button onClick={onLogout}
+          style={{width:"100%",padding:"10px",borderRadius:8,border:"1px solid #e2e8f0",
+            background:"transparent",color:"#94a3b8",cursor:"pointer",fontSize:13}}>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── PracticeConfig (BUG 1) ─────────────────────────────────────── */
+function PracticeConfig({ user, companyProfile, onSave, onBack, onLogout }) {
+  const [selected, setSelected] = useState(PRACTICES.map(p=>p.id)); // default all
+  const [filter,   setFilter]   = useState("All");
+  const [err,      setErr]       = useState("");
+
+  function toggle(id) {
+    setSelected(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+    setErr("");
+  }
+  function toggleGroup(g) {
+    const ids = PRACTICES.filter(p=>p.group===g).map(p=>p.id);
+    const allOn = ids.every(id=>selected.includes(id));
+    setSelected(prev => allOn ? prev.filter(id=>!ids.includes(id)) : [...new Set([...prev,...ids])]);
+  }
+  function handleSave() {
+    if (selected.length === 0) { setErr("Select at least 1 practice to continue."); return; }
+    onSave(selected);
+  }
+
+  const groupOptions = ["All",...GROUPS];
+  const visible = filter==="All" ? PRACTICES : PRACTICES.filter(p=>p.group===filter);
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
+      {/* Header */}
+      <div style={{background:TC,padding:"16px 24px",display:"flex",alignItems:"center",gap:12,
+        position:"sticky",top:0,zIndex:100}}>
+        <button onClick={onBack} style={{background:"rgba(255,255,255,.15)",border:"none",
+          color:"#fff",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:13}}>← Back</button>
+        <div style={{flex:1}}>
+          <div style={{color:"#fff",fontWeight:700,fontSize:16}}>Select Practices to Assess</div>
+          <div style={{color:"rgba(255,255,255,.6)",fontSize:11}}>
+            {companyProfile?.companyName} · {selected.length} of {PRACTICES.length} selected
+          </div>
+        </div>
+        <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.25)",
+          background:"transparent",color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:12}}>Sign Out</button>
+      </div>
+
+      <div style={{maxWidth:1100,margin:"24px auto",padding:"0 16px"}}>
+        {/* Selection summary card */}
+        <div style={{background:"#fff",borderRadius:12,padding:"20px 24px",marginBottom:20,
+          boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+            <div>
+              <div style={{fontWeight:700,color:TC,fontSize:15,marginBottom:4}}>
+                Choose which ITIL 4 practices to include in your assessment
+              </div>
+              <div style={{fontSize:13,color:"#64748b"}}>
+                You must select at least 1 practice. You can filter by group below.
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setSelected(PRACTICES.map(p=>p.id))}
+                style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${TCL}`,
+                  background:TCL+"11",color:TCL,fontWeight:600,cursor:"pointer",fontSize:13}}>
+                Select All
+              </button>
+              <button onClick={()=>setSelected([])}
+                style={{padding:"8px 16px",borderRadius:8,border:"1px solid #e2e8f0",
+                  background:"#f8fafc",color:"#64748b",fontWeight:600,cursor:"pointer",fontSize:13}}>
+                Clear All
+              </button>
+            </div>
+          </div>
+          {err && (
+            <div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",
+              padding:"10px 14px",borderRadius:8,marginTop:16,fontSize:13}}>{err}</div>
+          )}
+        </div>
+
+        {/* Group filter tabs */}
+        <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+          {groupOptions.map(g => {
+            const gIds = g==="All" ? PRACTICES.map(p=>p.id) : PRACTICES.filter(p=>p.group===g).map(p=>p.id);
+            const allOn = gIds.every(id=>selected.includes(id));
+            return (
+              <div key={g} style={{display:"flex",alignItems:"center",gap:0}}>
+                <button onClick={()=>setFilter(g)} style={{
+                  padding:"7px 14px",borderRadius:g==="All"?"20px":"20px 0 0 20px",
+                  border:"1px solid",fontSize:13,cursor:"pointer",fontWeight:500,
+                  background:filter===g?TC:"#fff",
+                  color:filter===g?"#fff":"#475569",
+                  borderColor:filter===g?TC:"#e2e8f0"}}>
+                  {g}
+                </button>
+                {g!=="All" && (
+                  <button onClick={()=>toggleGroup(g)} title={allOn?"Deselect group":"Select group"}
+                    style={{padding:"7px 10px",borderRadius:"0 20px 20px 0",border:"1px solid",
+                      borderLeft:"none",fontSize:12,cursor:"pointer",fontWeight:700,
+                      background:allOn?TCG+"22":"#f8fafc",color:allOn?TCG:"#94a3b8",
+                      borderColor:filter===g?TC:"#e2e8f0"}}>
+                    {allOn?"✓":"+"}</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Practices grid */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:10,marginBottom:24}}>
+          {visible.map(p => {
+            const on = selected.includes(p.id);
+            return (
+              <div key={p.id} onClick={()=>toggle(p.id)}
+                style={{background:on?"#fff":"#f8fafc",borderRadius:10,padding:16,cursor:"pointer",
+                  border:`2px solid ${on?TC:"#e2e8f0"}`,transition:"all .15s",
+                  display:"flex",alignItems:"center",gap:12}}
+                onMouseEnter={e=>{ e.currentTarget.style.borderColor=on?TC:TCL; }}
+                onMouseLeave={e=>{ e.currentTarget.style.borderColor=on?TC:"#e2e8f0"; }}>
+                <div style={{width:22,height:22,borderRadius:6,flexShrink:0,
+                  background:on?TC:"#fff",border:`2px solid ${on?TC:"#cbd5e1"}`,
+                  display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  {on && <span style={{color:"#fff",fontSize:13,fontWeight:700,lineHeight:1}}>✓</span>}
+                </div>
+                <div>
+                  <div style={{fontSize:10,color:"#94a3b8",fontWeight:600,textTransform:"uppercase",
+                    letterSpacing:.4,marginBottom:2}}>{p.group}</div>
+                  <div style={{fontWeight:600,color:on?TC:"#64748b",fontSize:13,lineHeight:1.4}}>
+                    {p.name}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Sticky footer */}
+        <div style={{position:"sticky",bottom:0,background:"#f0f4f8",paddingBottom:24}}>
+          <div style={{background:"#fff",borderRadius:12,padding:"16px 24px",
+            boxShadow:"0 -2px 12px rgba(0,0,0,.06)",display:"flex",
+            alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+            <div>
+              <span style={{fontWeight:700,color:TC,fontSize:16}}>{selected.length}</span>
+              <span style={{color:"#64748b",fontSize:14}}> practices selected for assessment</span>
+            </div>
+            <button onClick={handleSave}
+              style={{padding:"12px 32px",borderRadius:10,border:"none",background:selected.length>0?TC:"#e2e8f0",
+                color:selected.length>0?"#fff":"#94a3b8",fontWeight:700,fontSize:14,
+                cursor:selected.length>0?"pointer":"not-allowed"}}>
+              Start Assessment →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── SubmittedScreen (BUG 3) ────────────────────────────────────── */
+function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, selectedPractices, onLogout, onReport }) {
+  const practiceRows = PRACTICES.filter(p => selectedPractices.includes(p.id) && scores[p.id] != null);
+  const n = practiceRows.length;
+  const avgScore = n > 0 ? practiceRows.reduce((s,p)=>s+scores[p.id],0)/n : 0;
+
+  const dimAvgs = {};
+  for (const dk of DIM_KEYS) {
+    const vals = practiceRows.map(p=>dimScores[p.id]?.[dk]).filter(v=>v!=null);
+    dimAvgs[dk] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 1;
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
+      <div style={{background:TC,padding:"16px 24px",display:"flex",alignItems:"center",gap:12}}>
+        <div style={{width:36,height:36,borderRadius:8,background:"rgba(255,255,255,.15)",
+          display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>📊</div>
+        <div style={{flex:1}}>
+          <div style={{color:"#fff",fontWeight:700,fontSize:16}}>{TOOL_NAME}</div>
+          <div style={{color:"rgba(255,255,255,.6)",fontSize:11}}>{ORG_BRAND}</div>
+        </div>
+        <button onClick={onReport}
+          style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
+            background:"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
+          📄 View Report
+        </button>
+        <button onClick={onLogout}
+          style={{padding:"8px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.25)",
+            background:"transparent",color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:12}}>
+          Sign Out
+        </button>
+      </div>
+
+      <div style={{maxWidth:800,margin:"48px auto",padding:"0 16px"}}>
+        {/* Success hero */}
+        <div style={{background:"linear-gradient(135deg,#003087,#001f5c)",borderRadius:20,
+          padding:48,textAlign:"center",marginBottom:28,color:"#fff",
+          boxShadow:"0 8px 32px rgba(0,48,135,.25)"}}>
+          <div style={{fontSize:64,marginBottom:16}}>🎉</div>
+          <h1 style={{fontSize:26,fontWeight:800,margin:"0 0 8px"}}>Assessment Submitted!</h1>
+          <p style={{color:"rgba(255,255,255,.7)",fontSize:15,margin:"0 0 24px"}}>
+            Your assessment has been finalised and sent to your ITSM assessor.
+          </p>
+          <div style={{display:"inline-flex",gap:4,alignItems:"center",
+            background:"rgba(0,169,79,.2)",border:"1px solid rgba(0,169,79,.4)",
+            borderRadius:20,padding:"8px 20px"}}>
+            <span style={{color:"#4ade80",fontWeight:700,fontSize:14}}>🔒 Answers Locked — Read-Only</span>
+          </div>
+        </div>
+
+        {/* Score summary */}
+        <div style={{background:"#fff",borderRadius:16,padding:32,marginBottom:20,
+          boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+          <h2 style={{color:TC,fontSize:17,margin:"0 0 24px",fontWeight:700}}>Your Score Summary</h2>
+          {companyProfile && (
+            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 16px",marginBottom:20,
+              display:"flex",gap:24,flexWrap:"wrap"}}>
+              <div><span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>COMPANY</span>
+                <div style={{fontWeight:700,color:"#1e293b",fontSize:14}}>{companyProfile.companyName}</div></div>
+              <div><span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>INDUSTRY</span>
+                <div style={{fontWeight:700,color:"#1e293b",fontSize:14}}>{companyProfile.industry}</div></div>
+              <div><span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>SIZE</span>
+                <div style={{fontWeight:700,color:"#1e293b",fontSize:14}}>{companyProfile.employeeStrength}</div></div>
+            </div>
+          )}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:14,marginBottom:24}}>
+            <div style={{background:maturityColor(avgScore)+"11",borderRadius:12,padding:16,
+              textAlign:"center",border:`2px solid ${maturityColor(avgScore)}33`}}>
+              <div style={{fontSize:32,fontWeight:900,color:maturityColor(avgScore)}}>{avgScore.toFixed(2)}</div>
+              <div style={{fontSize:12,fontWeight:700,color:maturityColor(avgScore)}}>{maturityLabel(avgScore)}</div>
+              <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>Overall Score</div>
+            </div>
+            {DIM_KEYS.map(dk => (
+              <div key={dk} style={{background:DIMS[dk].color+"11",borderRadius:12,padding:16,
+                textAlign:"center",border:`1px solid ${DIMS[dk].color}33`}}>
+                <div style={{fontSize:22,fontWeight:800,color:DIMS[dk].color}}>{dimAvgs[dk].toFixed(2)}</div>
+                <div style={{fontSize:11,fontWeight:700,color:DIMS[dk].color}}>{dk}</div>
+                <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{DIMS[dk].label}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{borderTop:"1px solid #f1f5f9",paddingTop:16}}>
+            <h3 style={{fontSize:14,fontWeight:700,color:"#334155",marginBottom:12}}>Practice Scores</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {practiceRows.sort((a,b)=>scores[b.id]-scores[a.id]).map(p => (
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,
+                  padding:"8px 12px",background:"#f8fafc",borderRadius:8}}>
+                  <div style={{flex:1,fontSize:13,color:"#334155",fontWeight:500}}>{p.name}</div>
+                  <div style={{fontSize:11,color:"#94a3b8",textTransform:"capitalize"}}>{levels[p.id]}</div>
+                  <div style={{fontWeight:700,color:maturityColor(scores[p.id]),fontSize:14,minWidth:36,textAlign:"right"}}>
+                    {scores[p.id].toFixed(1)}
+                  </div>
+                  <div style={{fontSize:11,color:maturityColor(scores[p.id]),minWidth:80,textAlign:"right"}}>
+                    {maturityLabel(scores[p.id])}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{background:"#fff3cd",border:"1px solid #ffc107",borderRadius:12,padding:"16px 20px",
+          display:"flex",gap:12,alignItems:"flex-start"}}>
+          <div style={{fontSize:20}}>📧</div>
+          <div>
+            <div style={{fontWeight:700,color:"#856404",fontSize:14,marginBottom:4}}>What happens next?</div>
+            <div style={{fontSize:13,color:"#664d03"}}>
+              Your TCS ITSM Practice consultant will review your submission and prepare a full
+              PDF report with detailed recommendations. Expect to receive it within 2–3 business days.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, onBack, showToast, readOnly }) {
   const [level, setLevel]       = useState(existingLevel || null);
   const [answers, setAnswers]   = useState(existingAnswers || {});  // { qid: { main: 2|1|0, fup: 1|0.5|0 } }
   const [confirmed, setConfirmed] = useState(false);
@@ -779,13 +1851,14 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
   }, [level, practice, qb]);
 
   function setMain(qid, val) {
+    if (readOnly) return;
     setAnswers(prev => {
       const cur = prev[qid] || {};
-      // if answer changed, clear fup
       return { ...prev, [qid]: { main: val, fup: cur.main===val ? cur.fup : undefined } };
     });
   }
   function setFup(qid, val) {
+    if (readOnly) return;
     setAnswers(prev => ({ ...prev, [qid]: { ...(prev[qid]||{}), fup: val } }));
   }
 
@@ -1081,7 +2154,7 @@ function DimRadar({ dimData }) {
    Risk Register · Recommendations · Roadmap · ROI · ITIL5/AI · Appendix
 ═══════════════════════════════════════════════════════════════════ */
 
-function generatePDFHTML({ scores, dimScores, levels, username, ts }) {
+function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfile }) {
   const practiceRows = PRACTICES.filter(p => scores[p.id] != null);
   const n = practiceRows.length;
   const avgScore = n > 0 ? practiceRows.reduce((s,p)=>s+scores[p.id],0)/n : 0;
@@ -1360,6 +2433,10 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts }) {
     <div style="margin-bottom:12px;">
       <span style="background:rgba(200,16,46,.8);color:#fff;padding:6px 16px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">ITIL 4 Maturity Assessment</span>
     </div>
+    ${companyProfile ? `<div style="margin-bottom:16px;">
+      <span style="color:rgba(255,255,255,.85);font-size:20px;font-weight:700;">${companyProfile.companyName}</span>
+      <span style="color:rgba(255,255,255,.5);font-size:14px;margin-left:12px;">${companyProfile.industry} · ${companyProfile.employeeStrength} employees</span>
+    </div>` : ""}
     <h1 style="color:#fff;font-size:44px;font-weight:900;line-height:1.15;margin:16px 0 24px;max-width:680px;">
       IT Service Management<br/>Maturity & Strategic<br/>
       <span style="color:#009BDE;">Transformation Report</span>
@@ -1387,14 +2464,19 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts }) {
         <div style="color:rgba(255,255,255,.6);font-size:11px;margin-top:2px;">AI Readiness Index</div>
       </div>
     </div>
+    ${companyProfile?.itsmTools?.length ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <span style="color:rgba(255,255,255,.5);font-size:11px;align-self:center;">ITSM Tools:</span>
+      ${companyProfile.itsmTools.map(t=>`<span style="background:rgba(255,255,255,.12);color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;">${t}</span>`).join("")}
+    </div>` : ""}
   </div>
 
   <!-- Footer -->
   <div style="padding:24px 56px;background:rgba(0,0,0,.2);border-top:1px solid rgba(255,255,255,.1);">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
       <div>
         <div style="color:rgba(255,255,255,.5);font-size:11px;">Prepared for</div>
-        <div style="color:#fff;font-size:13px;font-weight:700;">CEO · CIO · CISO</div>
+        <div style="color:#fff;font-size:13px;font-weight:700;">${companyProfile ? companyProfile.companyName + " — " : ""}CEO · CIO · CISO</div>
       </div>
       <div style="text-align:center;">
         <div style="color:rgba(255,255,255,.5);font-size:11px;">Assessor</div>
@@ -1450,6 +2532,17 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts }) {
 <div class="section page-break">
   <div class="section-label">Section 01</div>
   <h2>Executive Briefing</h2>
+  ${companyProfile ? `
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;margin-bottom:20px;display:flex;gap:32px;flex-wrap:wrap;">
+    <div><div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Organisation</div>
+      <div style="font-size:15px;font-weight:700;color:#1e293b;">${companyProfile.companyName}</div></div>
+    <div><div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Industry</div>
+      <div style="font-size:14px;font-weight:600;color:#334155;">${companyProfile.industry}</div></div>
+    <div><div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Employee Strength</div>
+      <div style="font-size:14px;font-weight:600;color:#334155;">${companyProfile.employeeStrength}</div></div>
+    ${companyProfile.itsmTools?.length ? `<div><div style="font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">ITSM Tools</div>
+      <div style="font-size:13px;color:#334155;">${companyProfile.itsmTools.join(" · ")}</div></div>` : ""}
+  </div>` : ""}
   <p style="font-size:15px;color:#334155;font-weight:500;max-width:800px;line-height:1.8;">
     This assessment evaluated <strong>${n} ITIL 4 practices</strong> across General, Service, and Technical Management domains.
     The organisation currently operates at a <strong style="color:${maturityColor(avgScore)}">${maturityLabel(avgScore)} (${avgScore.toFixed(2)}/5.0)</strong> maturity level —
@@ -2145,7 +3238,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts }) {
     <div class="card">
       <h3>About This Assessment</h3>
       <p style="font-size:12px;">This report was generated by the <strong>${TOOL_NAME}</strong>, a proprietary assessment platform developed by <strong>${ORG_BRAND}</strong>. The platform applies the ITIL 4 framework (© AXELOS Limited) to evaluate organisational process maturity across all 34 practices. Assessment data is collected via structured questionnaires at Beginner, Practitioner, or Expert competency levels.</p>
-      <p style="font-size:12px;margin-bottom:0;">Version: ${VERSION} · Generated: ${dateStr} · Assessor: ${username||"TCS Consultant"}</p>
+      <p style="font-size:12px;margin-bottom:0;">Version: ${VERSION} · Generated: ${dateStr} · Assessor: ${username||"TCS Consultant"}${companyProfile ? ` · Client: ${companyProfile.companyName}` : ""}</p>
     </div>
     <div class="card">
       <h3>Contact & Next Steps</h3>
@@ -2206,9 +3299,12 @@ function printReport(data) {
 }
 
 /* ─── ReportView ─────────────────────────────────────────────────── */
-function ReportView({ scores, dimScores, levels, reportData, historyList, onBack, onLogout, user }) {
+function ReportView({ scores, dimScores, levels, reportData, historyList, onBack, onLogout, user, companyProfile }) {
   const [tab, setTab] = useState("overview");
   const [selPractice, setSelPractice] = useState(null);
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const [cloudUrl,    setCloudUrl]    = useState(null);
+  const isAdmin = user?.role === "admin";
 
   const practiceRows = PRACTICES.filter(p => scores[p.id] != null);
   const avgScore = practiceRows.length > 0
@@ -2246,10 +3342,31 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
       scores, dimScores, levels,
       completedCount: practiceRows.length,
       avgScore,
+      companyProfile,
     };
     const hist = ls.get(HISTORY_KEY, []);
     hist.push(entry);
     ls.set(HISTORY_KEY, hist);
+  }
+
+  async function saveToCloud() {
+    if (!IS_VERCEL) { alert("Cloud save requires a Vercel deployment."); return; }
+    setCloudSaving(true);
+    const html = generatePDFHTML({
+      scores, dimScores, levels,
+      username: user?.username,
+      ts: Date.now(),
+      companyProfile,
+    });
+    const { ok, data } = await api.call("POST", "/api/reports", {
+      htmlContent:  html,
+      username:     user?.username,
+      companyName:  companyProfile?.companyName || user?.username,
+      timestamp:    Date.now(),
+    });
+    setCloudSaving(false);
+    if (ok) { setCloudUrl(data.url); }
+    else    { alert("Cloud save failed: " + (data?.error || "unknown error")); }
   }
 
   return (
@@ -2265,11 +3382,32 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
             {user?.name||user?.username} · {practiceRows.length} practices · Overall {avgScore.toFixed(2)}
           </div>
         </div>
-        <button onClick={()=>printReport({scores,dimScores,levels,username:user?.username,ts:Date.now()})}
-          style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
-            background:"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
-          🖨️ Print / PDF
-        </button>
+        {/* BUG 4 — Print/PDF only for admin */}
+        {isAdmin && (
+          <button onClick={()=>printReport({scores,dimScores,levels,username:user?.username,ts:Date.now(),companyProfile})}
+            style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
+              background:"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
+            🖨️ Print / PDF
+          </button>
+        )}
+        {/* Cloud save — all users, only on Vercel */}
+        {IS_VERCEL && !cloudUrl && (
+          <button onClick={saveToCloud} disabled={cloudSaving}
+            style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
+              background:cloudSaving?"rgba(255,255,255,.1)":"transparent",
+              color:cloudSaving?"rgba(255,255,255,.5)":"#fff",
+              cursor:cloudSaving?"not-allowed":"pointer",fontSize:13,fontWeight:600}}>
+            {cloudSaving ? "Saving…" : "☁️ Save to Cloud"}
+          </button>
+        )}
+        {cloudUrl && (
+          <a href={cloudUrl} target="_blank" rel="noreferrer"
+            style={{padding:"8px 16px",borderRadius:8,border:"1px solid #4ade80",
+              background:"rgba(74,222,128,.15)",color:"#4ade80",
+              fontSize:13,fontWeight:600,textDecoration:"none"}}>
+            ✅ Saved — View
+          </a>
+        )}
         <button onClick={()=>{saveHistory();}}
           style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
             background:"transparent",color:"rgba(255,255,255,.8)",cursor:"pointer",fontSize:13}}>

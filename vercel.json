@@ -1,3 +1,10 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)",     "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/users.js":   { "maxDuration": 10 },
+    "api/reports.js": { "maxDuration": 30 }
+  }
 }
