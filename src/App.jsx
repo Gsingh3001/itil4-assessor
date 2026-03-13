@@ -1756,7 +1756,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts }) {
         <td style="color:#003087;font-weight:600;">4.00</td>
         <td><strong style="color:${sevColors[severity]}">${r.gap>0?"+"+r.gap.toFixed(2):"✓"}</strong></td>
         <td><span style="color:${DIMS[worstDk]?.color};font-weight:700;">${worstDk}</span> <span style="font-size:10px;color:#94a3b8;">${(r.dim[worstDk]||1).toFixed(2)}</span></td>
-        <td style="font-size:11px;color:#64748b;">${r.group.includes("Service")?"Service":"${r.group.includes("Technical")?"Tech":"General"}"}</td>
+        <td style="font-size:11px;color:#64748b;">${r.group.includes("Service")?"Service":r.group.includes("Technical")?"Tech":"General"}</td>
       </tr>`;}).join("")}
     </tbody>
   </table>
