@@ -28,7 +28,7 @@ const SUBMISSION_KEY = "itsm_v4_submission"; // per-user: full submission data f
 const ITSM_TOOLS = ["ServiceNow","Jira","BMC Remedy","Freshservice","Zendesk","ManageEngine","Other"];
 const INDUSTRIES = ["Banking & Financial Services","Insurance","Healthcare & Life Sciences","Retail & Consumer",
   "Manufacturing","Telecommunications","Energy & Utilities","Public Sector / Government",
-  "Media & Entertainment","Technology","Professional Services","Other"];
+  "Media & Entertainment","Technology","Professional Services","Airline","Logistics","Other"];
 const EMP_SIZES  = ["<500","500–2000","2000–10000","10000+"];
 
 /* ─── Dimensions ────────────────────────────────────────────────── */
