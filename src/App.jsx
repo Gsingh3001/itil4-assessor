@@ -430,7 +430,7 @@ export default function App() {
     setScreen("welcome");
   }
 
-  function finalSubmit() {
+  async function finalSubmit() {
     const practiceRows = PRACTICES.filter(p => scores[p.id] != null);
     const n = practiceRows.length;
     const avgScore = n > 0 ? practiceRows.reduce((s,p)=>s+scores[p.id],0)/n : 0;
@@ -454,10 +454,13 @@ export default function App() {
 
     // Automatic cloud upload
     if (IS_VERCEL) {
-      saveToCloud().then(success => {
+      try {
+        const success = await saveToCloud();
         if (success) showToast("Assessment submitted & saved to cloud!", "success");
         else showToast("Assessment submitted locally, but cloud save failed.", "error");
-      });
+      } catch (err) {
+        showToast("Assessment submitted locally; cloud save error.", "error");
+      }
     } else {
       showToast("Assessment submitted successfully!", "success");
     }
@@ -1758,11 +1761,13 @@ function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, sele
           <div style={{color:"#fff",fontWeight:700,fontSize:16}}>{TOOL_NAME}</div>
           <div style={{color:"rgba(255,255,255,.6)",fontSize:11}}>{ORG_BRAND}</div>
         </div>
-        <button onClick={onReport}
-          style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
-            background:"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
-          📄 View Report
-        </button>
+        {user?.role === "admin" && (
+          <button onClick={onReport}
+            style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
+              background:"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
+            📄 View Report
+          </button>
+        )}
         <button onClick={onLogout}
           style={{padding:"8px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.25)",
             background:"transparent",color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:12}}>
@@ -3410,8 +3415,8 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
             🖨️ Print / PDF
           </button>
         )}
-        {/* Cloud save — all users, only on Vercel */}
-        {IS_VERCEL && !cloudUrl && (
+        {/* Cloud save — admin only, only on Vercel */}
+        {IS_VERCEL && isAdmin && !cloudUrl && (
           <button onClick={saveToCloud} disabled={cloudSaving}
             style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
               background:cloudSaving?"rgba(255,255,255,.1)":"transparent",
@@ -3420,7 +3425,7 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
             {cloudSaving ? "Saving…" : "☁️ Save to Cloud"}
           </button>
         )}
-        {cloudUrl && (
+        {cloudUrl && isAdmin && (
           <a href={cloudUrl} target="_blank" rel="noreferrer"
             style={{padding:"8px 16px",borderRadius:8,border:"1px solid #4ade80",
               background:"rgba(74,222,128,.15)",color:"#4ade80",
