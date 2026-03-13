@@ -277,6 +277,8 @@ export default function App() {
   const [companyProfile,    setCompanyProfile]    = useState(null);  // { companyName, industry, employeeStrength, itsmTools[] }
   const [selectedPractices, setSelectedPractices] = useState([]);    // practice ids chosen by user
   const [submitted,         setSubmitted]         = useState(false); // final submit lock
+  const [cloudSaving,       setCloudSaving]       = useState(false);
+  const [cloudUrl,          setCloudUrl]          = useState(null);
 
   const showToast = useCallback((msg, type="info") => {
     setToast({ msg, type });
@@ -454,15 +456,44 @@ export default function App() {
 
     // Automatic cloud upload
     if (IS_VERCEL) {
-      try {
-        const success = await saveToCloud();
-        if (success) showToast("Assessment submitted & saved to cloud!", "success");
-        else showToast("Assessment submitted locally, but cloud save failed.", "error");
-      } catch (err) {
-        showToast("Assessment submitted locally; cloud save error.", "error");
+      const { success, error } = await saveToCloud();
+      if (success) {
+        showToast("Assessment submitted & saved to cloud!", "success");
+      } else {
+        showToast(`Submitted locally, but cloud save failed: ${error}`, "error");
       }
     } else {
       showToast("Assessment submitted successfully!", "success");
+    }
+  }
+
+  async function saveToCloud() {
+    if (!IS_VERCEL) return { success: false, error: "Not on Vercel" };
+    setCloudSaving(true);
+    try {
+      const html = generatePDFHTML({
+        scores, dimScores, levels,
+        username: user?.username,
+        ts: Date.now(),
+        companyProfile,
+      });
+      const { ok, data } = await api.call("POST", "/api/reports", {
+        htmlContent:  html,
+        username:     user?.username,
+        companyName:  companyProfile?.companyName || user?.username,
+        timestamp:    Date.now(),
+      });
+      setCloudSaving(false);
+      if (ok) {
+        setCloudUrl(data.url);
+        return { success: true };
+      } else {
+        const errMsg = data?.detail || data?.error || "unknown error";
+        return { success: false, error: errMsg };
+      }
+    } catch (err) {
+      setCloudSaving(false);
+      return { success: false, error: err.message || "Network error" };
     }
   }
 
@@ -552,7 +583,8 @@ export default function App() {
         scores={scores} dimScores={dimScores} levels={levels}
         reportData={reportData} historyList={historyList}
         onBack={() => setScreen(user?.role==="admin"?"admindash":"practices")}
-        onLogout={logout} user={user} companyProfile={companyProfile} />}
+        onLogout={logout} user={user} companyProfile={companyProfile}
+        cloudSaving={cloudSaving} cloudUrl={cloudUrl} onSaveToCloud={saveToCloud} />}
     </div>
   );
 }
@@ -3319,11 +3351,9 @@ function printReport(data) {
 }
 
 /* ─── ReportView ─────────────────────────────────────────────────── */
-function ReportView({ scores, dimScores, levels, reportData, historyList, onBack, onLogout, user, companyProfile }) {
+function ReportView({ scores, dimScores, levels, reportData, historyList, onBack, onLogout, user, companyProfile, cloudSaving, cloudUrl, onSaveToCloud }) {
   const [tab, setTab] = useState("overview");
   const [selPractice, setSelPractice] = useState(null);
-  const [cloudSaving, setCloudSaving] = useState(false);
-  const [cloudUrl,    setCloudUrl]    = useState(null);
   const isAdmin = user?.role === "admin";
 
   const practiceRows = PRACTICES.filter(p => scores[p.id] != null);
@@ -3369,30 +3399,6 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
     ls.set(HISTORY_KEY, hist);
   }
 
-  async function saveToCloud() {
-    if (!IS_VERCEL) { alert("Cloud save requires a Vercel deployment."); return; }
-    setCloudSaving(true);
-    const html = generatePDFHTML({
-      scores, dimScores, levels,
-      username: user?.username,
-      ts: Date.now(),
-      companyProfile,
-    });
-    const { ok, data } = await api.call("POST", "/api/reports", {
-      htmlContent:  html,
-      username:     user?.username,
-      companyName:  companyProfile?.companyName || user?.username,
-      timestamp:    Date.now(),
-    });
-    setCloudSaving(false);
-    if (ok) {
-      setCloudUrl(data.url);
-      return true;
-    } else {
-      alert("Cloud save failed: " + (data?.detail || data?.error || "unknown error"));
-      return false;
-    }
-  }
 
   return (
     <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
@@ -3417,7 +3423,7 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
         )}
         {/* Cloud save — admin only, only on Vercel */}
         {IS_VERCEL && isAdmin && !cloudUrl && (
-          <button onClick={saveToCloud} disabled={cloudSaving}
+          <button onClick={onSaveToCloud} disabled={cloudSaving}
             style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
               background:cloudSaving?"rgba(255,255,255,.1)":"transparent",
               color:cloudSaving?"rgba(255,255,255,.5)":"#fff",
