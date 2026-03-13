@@ -608,11 +608,14 @@ export default function App() {
         </div>
       )}
       {modal && <ModalDialog {...modal} onClose={() => setModal(null)} />}
-      {screen === "userlogin"  && <UserLogin onLogin={async (username, p) => {
-        const ok = await login(username, p);
-        if (ok) routeAfterLogin(username);
-        return ok;
-      }} />}
+      {screen === "userlogin"  && <UserLogin 
+        onLogin={async (username, p) => {
+          const ok = await login(username, p);
+          if (ok) routeAfterLogin(username);
+          return ok;
+        }} 
+        onAdmin={() => setScreen("adminlogin")} 
+      />}
       {screen === "companyprofile" && <CompanyProfile user={user} onSave={saveProfile} onLogout={logout} />}
       {screen === "practiceconfig" && <PracticeConfig user={user} companyProfile={companyProfile}
         onSave={savePracticeConfig} onBack={() => setScreen("companyprofile")} onLogout={logout} />}
@@ -638,7 +641,7 @@ export default function App() {
         showToast("Admin credentials incorrect","error"); return false;
       }} onBack={() => setScreen("welcome")} />}
       {screen === "admindash"  && <AdminDashboard onBack={() => setScreen("welcome")}
-        showToast={showToast} />}
+        showToast={showToast} setModal={setModal} />}
       {screen === "practices"  && <PracticeSelect scores={scores} dimScores={dimScores}
         onSelect={goAssess} onBack={() => setScreen("welcome")}
         user={user} onLogout={logout}
@@ -696,7 +699,7 @@ function ModalDialog({ title, msg, onOk, onClose }) {
 }
 
 /* ─── UserLogin ─────────────────────────────────────────────────── */
-function UserLogin({ onLogin }) {
+function UserLogin({ onLogin, onAdmin }) {
   const [u, setU] = useState(""); const [p, setP] = useState("");
   const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
   async function handle() {
@@ -710,13 +713,12 @@ function UserLogin({ onLogin }) {
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:`linear-gradient(135deg,${TC} 0%,#001f5c 100%)`}}>
       <div style={{background:"#fff",borderRadius:16,padding:40,width:360,boxShadow:"0 20px 60px rgba(0,0,0,.4)"}}>
-        <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{width:60,height:60,borderRadius:14,background:TC,display:"flex",
-            alignItems:"center",justifyContent:"center",margin:"0 auto 16px",
-            fontSize:26}}>🏢</div>
-          <div style={{fontSize:20,fontWeight:700,color:TC}}>{TOOL_NAME}</div>
-          <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>{ORG_BRAND} · {VERSION}</div>
-        </div>
+        <button onClick={onAdmin} disabled={loading}
+          style={{width:"100%",padding:"10px",borderRadius:8, marginBottom: 20,
+            border:"1px solid #e2e8f0",background:"transparent",cursor:"pointer",fontSize:13,color:TC, fontWeight:700}}>
+          🔑 Admin Portal Login
+        </button>
+
         {err && <div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",
           padding:"10px 14px",borderRadius:8,marginBottom:16,fontSize:13}}>{err}</div>}
         <div style={{marginBottom:16}}>
@@ -739,6 +741,7 @@ function UserLogin({ onLogin }) {
             cursor:loading?"not-allowed":"pointer"}}>
           {loading ? "Signing in…" : "Sign In"}
         </button>
+
         <p style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:20,marginBottom:0}}>
           ITIL 4 Process Maturity Assessment · {ORG_BRAND}
         </p>
@@ -800,7 +803,7 @@ function AdminLogin({ onLogin, onBack }) {
 }
 
 /* ─── AdminDashboard ─────────────────────────────────────────────── */
-function AdminDashboard({ onBack, showToast }) {
+function AdminDashboard({ onBack, showToast, setModal }) {
   const [tab,      setTab]      = useState("users");
   const [users,    setUsers]    = useState(() => ls.get(USERS_KEY, {}));
   const [newU,     setNewU]     = useState("");
@@ -821,6 +824,7 @@ function AdminDashboard({ onBack, showToast }) {
   const [oppLoading,       setOppLoading]       = useState(false);
   const [oppErr,           setOppErr]           = useState("");
   const [deletingOpp,      setDeletingOpp]      = useState(null);
+  const [refresh,          setRefresh]          = useState(0); // For list re-renders
 
   // Reload users — try remote first, fall back to localStorage
   async function reloadUsers() {
@@ -899,26 +903,51 @@ function AdminDashboard({ onBack, showToast }) {
 
   async function deleteUser(username) {
     if (username === "Admin") { showToast("Cannot delete Admin", "error"); return; }
-    setDeleting(username);
+    
+    setModal({
+      title: "Delete User account?",
+      msg: `Are you sure you want to delete "${username}"? This will remove all their local progress and cloud references.`,
+      onOk: async () => {
+        setDeleting(username);
 
-    // ── Remote first ──
-    if (IS_VERCEL) {
-      const { ok, data } = await api.call("DELETE", `/api/users?username=${encodeURIComponent(username)}`);
-      if (!ok) {
+        // ── Remote first ──
+        if (IS_VERCEL) {
+          const { ok, data } = await api.call("DELETE", `/api/users?username=${encodeURIComponent(username)}`);
+          if (!ok) {
+            setDeleting(null);
+            showToast(data?.error || "Failed to delete user remotely", "error");
+            return;
+          }
+        }
+
+        // ── Mirror locally ──
+        const updated = { ...ls.get(USERS_KEY, {}) };
+        delete updated[username];
+        ls.set(USERS_KEY, updated);
+
+        // ── Clear submission status ──
+        ls.remove(`${SUBMIT_KEY}_${username}`);
+
         setDeleting(null);
-        showToast(data?.error || "Failed to delete user remotely", "error");
-        return;
+        await reloadUsers();
+        showToast(`User '${username}' deleted.`, "success");
+        if (viewUser === username) setViewUser(null);
       }
-    }
+    });
+  }
 
-    // ── Mirror locally ──
-    const updated = { ...ls.get(USERS_KEY, {}) };
-    delete updated[username];
-    ls.set(USERS_KEY, updated);
-
-    setDeleting(null);
-    await reloadUsers();
-    showToast(`User '${username}' deleted`, "success");
+  async function deleteHistoryEntry(ts) {
+    setModal({
+      title: "Delete Assessment History?",
+      msg: "Are you sure you want to delete this specific assessment record? This action is permanent and cannot be undone.",
+      onOk: () => {
+        const all = ls.get(HISTORY_KEY, []);
+        const filtered = all.filter(h => h.ts !== ts);
+        ls.set(HISTORY_KEY, filtered);
+        showToast("Assessment record removed from history.", "success");
+        setRefresh(prev => prev + 1);
+      }
+    });
   }
 
   async function saveReportToCloud(h, cp) {
@@ -947,28 +976,39 @@ function AdminDashboard({ onBack, showToast }) {
   }
 
   async function deleteCloudReport(pathname) {
-    setDeletingReport(pathname);
-    const { ok, data } = await api.call("DELETE", `/api/reports?pathname=${encodeURIComponent(pathname)}`);
-    setDeletingReport(null);
-    if (ok) {
-      showToast("Report deleted", "success");
-      setCloudReports(prev => prev.filter(r => r.pathname !== pathname));
-    } else {
-      showToast(data?.error || "Delete failed", "error");
-    }
+    setModal({
+      title: "Delete Cloud Report?",
+      msg: "Are you sure you want to delete this report from the cloud? The public link will stop working.",
+      onOk: async () => {
+        setDeletingReport(pathname);
+        const { ok, data } = await api.call("DELETE", `/api/reports?pathname=${encodeURIComponent(pathname)}`);
+        setDeletingReport(null);
+        if (ok) {
+          showToast("Report deleted", "success");
+          setCloudReports(prev => prev.filter(r => r.pathname !== pathname));
+        } else {
+          showToast(data?.error || "Delete failed", "error");
+        }
+      }
+    });
   }
 
   async function deleteOpportunity(id) {
-    if (!window.confirm("Delete this opportunity lead?")) return;
-    setDeletingOpp(id);
-    const { ok, data } = await api.call("DELETE", `/api/opportunities?id=${encodeURIComponent(id)}`);
-    setDeletingOpp(null);
-    if (ok) {
-      showToast("Opportunity deleted", "success");
-      setOpportunities(prev => prev.filter(o => o.id !== id));
-    } else {
-      showToast(data?.error || "Delete failed", "error");
-    }
+    setModal({
+      title: "Delete Opportunity?",
+      msg: "Are you sure you want to remove this sales lead?",
+      onOk: async () => {
+        setDeletingOpp(id);
+        const { ok, data } = await api.call("DELETE", `/api/opportunities?id=${encodeURIComponent(id)}`);
+        setDeletingOpp(null);
+        if (ok) {
+          showToast("Opportunity deleted", "success");
+          setOpportunities(prev => prev.filter(o => o.id !== id));
+        } else {
+          showToast(data?.error || "Delete failed", "error");
+        }
+      }
+    });
   }
 
   function exportOpportunitiesCSV() {
@@ -1189,6 +1229,9 @@ function AdminDashboard({ onBack, showToast }) {
                 ? all.filter(h => h.username === viewUser)
                 : all;
               const sorted   = filtered.slice().reverse();
+              // history variable is not used here directly, we use sorted which is derived from localStorage
+              // but we need to reference 'refresh' to trigger re-run
+              const _ = refresh; 
               if (!sorted.length) return (
                 <div style={{background:"#fff", borderRadius:12, padding:60, textAlign:"center",
                   boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
@@ -1307,6 +1350,13 @@ function AdminDashboard({ onBack, showToast }) {
                             {isSavingThis ? "Saving…" : "☁️ Save to Cloud"}
                           </button>
                         )}
+                        <button
+                          onClick={()=>deleteHistoryEntry(h.ts)}
+                          style={{padding:"8px 14px", borderRadius:8, border:"none",
+                            background:"#fef2f2", color:TCR,
+                            cursor:"pointer", fontSize:12, fontWeight:700, marginTop:12}}>
+                          🗑️ Delete Record
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1557,6 +1607,12 @@ function Welcome({ user, completedCount, totalCount, onStart, onLogout, onAdmin,
             </div>
           </div>
         )}
+        {user?.role==="admin" && (
+          <button onClick={onAdmin} style={{width:"100%",padding:"14px",borderRadius:10,border:"none",
+            background:TC,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:12}}>
+            ⚙️ Admin Dashboard
+          </button>
+        )}
         {submitted ? (
           <div style={{background:"rgba(0,169,79,.2)",border:"1px solid rgba(0,169,79,.4)",
             borderRadius:10,padding:"12px 16px",marginBottom:16,textAlign:"center"}}>
@@ -1576,16 +1632,9 @@ function Welcome({ user, completedCount, totalCount, onStart, onLogout, onAdmin,
             View Report
           </button>
         )}
-        <div style={{display:"flex",gap:8}}>
-          {user?.role==="admin" && (
-            <button onClick={onAdmin} style={{flex:1,padding:"10px",borderRadius:8,
-              border:"1px solid rgba(255,255,255,.3)",background:"rgba(255,255,255,.1)",
-              color:"rgba(255,255,255,.8)",cursor:"pointer",fontSize:13}}>⚙️ Admin</button>
-          )}
-          <button onClick={onLogout} style={{flex:1,padding:"10px",borderRadius:8,
-            border:"1px solid rgba(255,255,255,.3)",background:"transparent",
-            color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:13}}>Sign Out</button>
-        </div>
+        <button onClick={onLogout} style={{width:"100%",padding:"10px",borderRadius:8,
+          border:"1px solid rgba(255,255,255,.3)",background:"transparent",
+          color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:13}}>Sign Out</button>
       </div>
     </div>
   );
