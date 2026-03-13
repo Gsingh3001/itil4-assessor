@@ -2432,8 +2432,8 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
       <div style="display:flex;align-items:center;gap:16px;">
         <div style="width:48px;height:48px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;">🏢</div>
         <div>
-          <div style="color:#fff;font-weight:800;font-size:18px;letter-spacing:.5px;">TCS</div>
-          <div style="color:rgba(255,255,255,.6);font-size:11px;letter-spacing:1px;">ITSM Practice</div>
+          <div style="color:#fff;font-weight:800;font-size:18px;letter-spacing:.5px;">ITSM</div>
+          <div style="color:rgba(255,255,255,.6);font-size:11px;letter-spacing:1px;">Practice</div>
         </div>
       </div>
       <div style="text-align:right;">
@@ -2495,7 +2495,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
       </div>
       <div style="text-align:center;">
         <div style="color:rgba(255,255,255,.5);font-size:11px;">Assessor</div>
-        <div style="color:#fff;font-size:13px;font-weight:700;">${username||"TCS Consultant"}</div>
+        <div style="color:#fff;font-size:13px;font-weight:700;">${username||"ITSM Practice Consultant"}</div>
       </div>
       <div style="text-align:right;">
         <div style="color:rgba(255,255,255,.5);font-size:11px;">Report Date</div>
