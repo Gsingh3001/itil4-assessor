@@ -151,6 +151,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
     console.error("[/api/reports] error:", err);
-    return res.status(500).json({ error: "Internal server error", detail: err.message });
+    // Categorize common errors for easier debugging
+    let detail = err.message;
+    if (detail.includes("BLOB_READ_WRITE_TOKEN")) {
+      detail = "Vercel BLOB_READ_WRITE_TOKEN is missing. Please ensure the Blob store is linked to this project and redeployed.";
+    }
+    return res.status(500).json({ error: "Internal server error", detail });
   }
 }

@@ -3366,7 +3366,7 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
     });
     setCloudSaving(false);
     if (ok) { setCloudUrl(data.url); }
-    else    { alert("Cloud save failed: " + (data?.error || "unknown error")); }
+    else    { alert("Cloud save failed: " + (data?.detail || data?.error || "unknown error")); }
   }
 
   return (
