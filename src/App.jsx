@@ -15,6 +15,15 @@ const TCR = "#c8102e";
 const TCL = "#009BDE";
 const TCG = "#00A94F";
 
+/* ─── Design System Tokens ──────────────────────────────────────── */
+const DS = {
+  bg:           "#0f1224",   // page background
+  surfaceMid:   "#1b1f30",   // cards / panels
+  surfaceLow:   "#171a2c",   // sidebar
+  primary:      "#b4c5ff",   // primary accent
+  onSurfaceVar: "#8892b0",   // muted / secondary text
+};
+
 /* ─── Storage Keys ──────────────────────────────────────────────── */
 const USERS_KEY    = "itsm_v4_users";
 const USER_SES_KEY = "itsm_v4_usersession";
@@ -683,10 +692,10 @@ function ModalDialog({ title, msg, onOk, onClose }) {
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:8888,
       display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{background:"#fff",borderRadius:12,padding:32,maxWidth:420,width:"90%",
-        boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
-        <h3 style={{margin:"0 0 12px",color:TC}}>{title}</h3>
-        <p style={{margin:"0 0 24px",color:"#475569",lineHeight:1.6}}>{msg}</p>
+      <div style={{background:DS.surfaceMid,borderRadius:12,padding:32,maxWidth:420,width:"90%",
+        boxShadow:"0 20px 60px rgba(0,0,0,.6)"}}>
+        <h3 style={{margin:"0 0 12px",color:DS.primary}}>{title}</h3>
+        <p style={{margin:"0 0 24px",color:DS.onSurfaceVar,lineHeight:1.6}}>{msg}</p>
         <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
           <button onClick={onClose} style={{padding:"8px 20px",borderRadius:6,border:"1px solid #e2e8f0",
             background:"#f8fafc",cursor:"pointer",fontWeight:500}}>Cancel</button>
@@ -712,7 +721,7 @@ function UserLogin({ onLogin, onAdmin }) {
   return (
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:`linear-gradient(135deg,${TC} 0%,#001f5c 100%)`}}>
-      <div style={{background:"#fff",borderRadius:16,padding:40,width:360,boxShadow:"0 20px 60px rgba(0,0,0,.4)"}}>
+      <div style={{background:DS.surfaceMid,borderRadius:16,padding:40,width:360,boxShadow:"0 20px 60px rgba(0,0,0,.7)"}}>
         <button onClick={onAdmin} disabled={loading}
           style={{width:"100%",padding:"10px",borderRadius:8, marginBottom: 20,
             border:"1px solid #e2e8f0",background:"transparent",cursor:"pointer",fontSize:13,color:TC, fontWeight:700}}>
@@ -742,7 +751,7 @@ function UserLogin({ onLogin, onAdmin }) {
           {loading ? "Signing in…" : "Sign In"}
         </button>
 
-        <p style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:20,marginBottom:0}}>
+        <p style={{textAlign:"center",fontSize:11,color:DS.onSurfaceVar,marginTop:20,marginBottom:0}}>
           ITIL 4 Process Maturity Assessment · {ORG_BRAND}
         </p>
       </div>
@@ -768,7 +777,7 @@ function AdminLogin({ onLogin, onBack }) {
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{fontSize:30,marginBottom:8}}>🔐</div>
           <div style={{fontSize:18,fontWeight:700,color:"#1e1b4b"}}>Admin Portal</div>
-          <div style={{fontSize:12,color:"#94a3b8"}}>{TOOL_NAME}</div>
+          <div style={{fontSize:12,color:DS.onSurfaceVar}}>{TOOL_NAME}</div>
         </div>
         {err && <div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",
           padding:"10px 14px",borderRadius:8,marginBottom:16,fontSize:13}}>{err}</div>}
@@ -1692,8 +1701,8 @@ function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, o
         )}
 
         {/* Progress bar */}
-        <div style={{background:"#fff",borderRadius:12,padding:"20px 24px",marginBottom:20,
-          boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+        <div style={{background:DS.surfaceMid,borderRadius:12,padding:"20px 24px",marginBottom:20,
+          boxShadow:"0 1px 4px rgba(0,0,0,.3)"}}>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
             <span style={{fontWeight:700,color:TC,fontSize:15}}>Assessment Progress</span>
             <span style={{fontSize:13,color:"#64748b"}}>{completedCount} of {activePractices.length} completed</span>
@@ -2232,8 +2241,8 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
           { key:"expert", label:"Expert", icon:"🔴", desc:"Quantitative evidence. Actual numbers (MTTR, SLA%, CFR), advanced analysis.", qcount: qb?.[practice?.id]?.expert?.length||10 },
         ].map(opt => (
           <div key={opt.key} onClick={() => setLevel(opt.key)}
-            style={{background:"#fff",borderRadius:14,padding:24,marginBottom:16,cursor:"pointer",
-              border:"2px solid #e2e8f0",boxShadow:"0 1px 4px rgba(0,0,0,.06)",
+            style={{background:DS.surfaceMid,borderRadius:14,padding:24,marginBottom:16,cursor:"pointer",
+              border:"2px solid rgba(255,255,255,0.10)",boxShadow:"0 1px 4px rgba(0,0,0,.3)",
               display:"flex",alignItems:"center",gap:20,transition:"all .2s"}}
             onMouseEnter={e=>{e.currentTarget.style.borderColor=TC;e.currentTarget.style.transform="translateY(-2px)";}}
             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e2e8f0";e.currentTarget.style.transform="translateY(0)";}}>
@@ -2241,9 +2250,9 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
             <div style={{flex:1}}>
               <div style={{fontWeight:700,color:TC,fontSize:16,marginBottom:4}}>{opt.label}</div>
               <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>{opt.desc}</div>
-              <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>{opt.qcount} questions</div>
+              <div style={{fontSize:11,color:DS.onSurfaceVar,marginTop:6}}>{opt.qcount} questions</div>
             </div>
-            <div style={{fontSize:20,color:"#94a3b8"}}>›</div>
+            <div style={{fontSize:20,color:DS.onSurfaceVar}}>›</div>
           </div>
         ))}
       </div>
@@ -2303,8 +2312,8 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
           const dimColor = DIMS[q.dim]?.color || "#94a3b8";
 
           return (
-            <div key={q.qid} style={{background:"#fff",borderRadius:12,padding:24,marginBottom:16,
-              boxShadow:"0 1px 4px rgba(0,0,0,.06)",
+            <div key={q.qid} style={{background:DS.surfaceMid,borderRadius:12,padding:24,marginBottom:16,
+              boxShadow:"0 1px 4px rgba(0,0,0,.3)",
               borderLeft:`4px solid ${ans.main!=null?maturityColor(ans.main===2?4.5:ans.main===1?2.8:1.2):"#e2e8f0"}`}}>
               {/* Question header */}
               <div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:16}}>
@@ -2339,16 +2348,17 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
               {/* Answer buttons */}
               <div style={{display:"flex",gap:8,marginLeft:40}}>
                 {[
-                  { val:2, label:"Yes",     bg:"#dcfce7", border:"#22c55e", color:"#15803d", dot:"#22c55e" },
-                  { val:1, label:"Partial", bg:"#fef9c3", border:"#eab308", color:"#92400e", dot:"#eab308" },
-                  { val:0, label:"No",      bg:"#fee2e2", border:"#ef4444", color:"#991b1b", dot:"#ef4444" },
+                  { val:2, label:"Yes",     bg:"rgba(34,197,94,0.20)",  border:"#22c55e", color:"#86efac", dot:"#22c55e" },
+                  { val:1, label:"Partial", bg:"rgba(234,179,8,0.20)",  border:"#eab308", color:"#fde68a", dot:"#eab308" },
+                  { val:0, label:"No",      bg:"rgba(239,68,68,0.20)",  border:"#ef4444", color:"#fca5a5", dot:"#ef4444" },
                 ].map(btn => (
                   <button key={btn.val} onClick={() => setMain(q.qid, btn.val)}
                     style={{flex:1,padding:"10px 8px",borderRadius:8,fontWeight:600,fontSize:13,
                       cursor:"pointer",transition:"all .15s",
-                      border:`2px solid ${ans.main===btn.val?btn.border:"#e2e8f0"}`,
-                      background: ans.main===btn.val ? btn.bg : "#f8fafc",
-                      color: ans.main===btn.val ? btn.color : "#64748b",
+                      border:`2px solid ${ans.main===btn.val?btn.border:"rgba(255,255,255,0.10)"}`,
+                      background: ans.main===btn.val ? btn.bg : "rgba(255,255,255,0.05)",
+                      backdropFilter:"blur(8px)",
+                      color: ans.main===btn.val ? btn.color : DS.onSurfaceVar,
                       transform: ans.main===btn.val ? "scale(1.03)" : "scale(1)"}}>
                     {btn.label}
                   </button>
@@ -2363,7 +2373,7 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
                   <div style={{fontSize:11,color:dimColor,fontWeight:700,marginBottom:8,
                     display:"flex",alignItems:"center",gap:6}}>
                     <span style={{fontSize:14}}>↳</span> Follow-up Question
-                    <span style={{fontSize:10,color:"#94a3b8",fontWeight:400,marginLeft:4}}>
+                    <span style={{fontSize:10,color:DS.onSurfaceVar,fontWeight:400,marginLeft:4}}>
                       (half-weight · contributes to {q.dim})
                     </span>
                   </div>
@@ -2372,16 +2382,17 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
                   </p>
                   <div style={{display:"flex",gap:8}}>
                     {[
-                      { val:1,   label:"Yes",     bg:"#dcfce7", border:"#22c55e", color:"#15803d" },
-                      { val:0.5, label:"Partial", bg:"#fef9c3", border:"#eab308", color:"#92400e" },
-                      { val:0,   label:"No",      bg:"#fee2e2", border:"#ef4444", color:"#991b1b" },
+                      { val:1,   label:"Yes",     bg:"rgba(34,197,94,0.20)",  border:"#22c55e", color:"#86efac" },
+                      { val:0.5, label:"Partial", bg:"rgba(234,179,8,0.20)",  border:"#eab308", color:"#fde68a" },
+                      { val:0,   label:"No",      bg:"rgba(239,68,68,0.20)",  border:"#ef4444", color:"#fca5a5" },
                     ].map(btn => (
                       <button key={btn.val} onClick={() => setFup(q.qid, btn.val)}
                         style={{flex:1,padding:"8px",borderRadius:8,fontWeight:600,fontSize:12,
                           cursor:"pointer",transition:"all .15s",
-                          border:`2px solid ${ans.fup===btn.val?btn.border:"#e2e8f0"}`,
-                          background: ans.fup===btn.val ? btn.bg : "#fff",
-                          color: ans.fup===btn.val ? btn.color : "#94a3b8"}}>
+                          border:`2px solid ${ans.fup===btn.val?btn.border:"rgba(255,255,255,0.10)"}`,
+                          background: ans.fup===btn.val ? btn.bg : "rgba(255,255,255,0.05)",
+                          backdropFilter:"blur(8px)",
+                          color: ans.fup===btn.val ? btn.color : DS.onSurfaceVar}}>
                         {btn.label}
                       </button>
                     ))}
@@ -2393,21 +2404,21 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
         })}
 
         {/* Submit footer */}
-        <div style={{background:"#fff",borderRadius:12,padding:20,marginBottom:40,
-          boxShadow:"0 1px 4px rgba(0,0,0,.06)",display:"flex",alignItems:"center",gap:16}}>
+        <div style={{background:DS.surfaceMid,borderRadius:12,padding:20,marginBottom:40,
+          boxShadow:"0 1px 4px rgba(0,0,0,.3)",display:"flex",alignItems:"center",gap:16}}>
           <div style={{flex:1}}>
             <div style={{fontWeight:600,color:TC,fontSize:14}}>
               {canSubmit ? `Ready to submit — ${pct}% complete` : `${mandatoryLeft.length} required question(s) remaining`}
             </div>
-            <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>
+            <div style={{fontSize:12,color:DS.onSurfaceVar,marginTop:2}}>
               {answeredMain} of {questions.length} questions answered
             </div>
           </div>
           <button onClick={handleSubmit} disabled={!canSubmit}
             style={{padding:"12px 28px",borderRadius:10,border:"none",fontWeight:700,fontSize:14,
               cursor:canSubmit?"pointer":"not-allowed",
-              background:canSubmit?TCG:"#e2e8f0",
-              color:canSubmit?"#fff":"#94a3b8"}}>
+              background:canSubmit?TCG:"rgba(255,255,255,0.08)",
+              color:canSubmit?"#fff":DS.onSurfaceVar}}>
             Submit Assessment
           </button>
         </div>
@@ -3962,7 +3973,7 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
                 <div style={{background:"#fff",borderRadius:12,padding:60,textAlign:"center",
                   boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
                   <div style={{fontSize:40,marginBottom:16}}>👈</div>
-                  <div style={{color:"#94a3b8",fontSize:15}}>Select a practice from the list to view its detailed scores.</div>
+                  <div style={{color:DS.onSurfaceVar,fontSize:15}}>Select a practice from the list to view its detailed scores.</div>
                 </div>
               )}
             </div>
