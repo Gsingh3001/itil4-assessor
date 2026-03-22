@@ -163,6 +163,8 @@ function parseQBFromSheet(rows) {
       qid:       String(r.question_id || "").trim(),
       text:      String(r.question_text || "").trim(),
       hint:      String(r.hint || "").trim(),
+      evidence:  String(r.evidence_prompt || "").trim(),
+      guidance:  String(r.scoring_guidance || "").trim(),
       dim:       DIM_KEYS.includes(dim) ? dim : "PE",
       fup_p:     String(r.followup_if_partial || "").trim(),
       fup_n:     String(r.followup_if_no || "").trim(),
@@ -563,6 +565,7 @@ export default function App() {
         username: user?.username,
         ts: Date.now(),
         companyProfile,
+        qb,
       });
       const { ok, data } = await api.call("POST", "/api/reports", {
         htmlContent:  html,
@@ -664,7 +667,7 @@ export default function App() {
         showToast={showToast} readOnly={submitted} />}
       {screen === "submitted"  && <SubmittedScreen user={user} scores={scores}
         dimScores={dimScores} levels={levels} companyProfile={companyProfile}
-        selectedPractices={selectedPractices}
+        selectedPractices={selectedPractices} qb={qb}
         onLogout={logout} onReport={() => {
           setReportData({ scores, dimScores, levels, username: user?.username, ts: Date.now(), companyProfile });
           setScreen("report");
@@ -674,7 +677,8 @@ export default function App() {
         reportData={reportData} historyList={historyList}
         onBack={() => setScreen(user?.role==="admin"?"admindash":"practices")}
         onLogout={logout} user={user} companyProfile={companyProfile}
-        cloudSaving={cloudSaving} cloudUrl={cloudUrl} onSaveToCloud={saveToCloud} />}
+        cloudSaving={cloudSaving} cloudUrl={cloudUrl} onSaveToCloud={saveToCloud}
+        qb={qb} />}
     </div>
   );
 }
@@ -2050,11 +2054,12 @@ function PracticeConfig({ user, companyProfile, onSave, onBack, onLogout }) {
   );
 }
 
-/* ─── SubmittedScreen (BUG 3) ────────────────────────────────────── */
-function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, selectedPractices, onLogout, onReport }) {
+/* ─── SubmittedScreen ─────────────────────────────────────────────── */
+function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, selectedPractices, onLogout, onReport, qb }) {
   const practiceRows = PRACTICES.filter(p => selectedPractices.includes(p.id) && scores[p.id] != null);
   const n = practiceRows.length;
   const avgScore = n > 0 ? practiceRows.reduce((s,p)=>s+scores[p.id],0)/n : 0;
+  const [showAll, setShowAll] = useState(false);
 
   const dimAvgs = {};
   for (const dk of DIM_KEYS) {
@@ -2062,8 +2067,12 @@ function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, sele
     dimAvgs[dk] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 1;
   }
 
+  const topP    = [...practiceRows].sort((a,b)=>scores[b.id]-scores[a.id]).slice(0,3);
+  const bottomP = [...practiceRows].sort((a,b)=>scores[a.id]-scores[b.id]).slice(0,3);
+
   return (
     <div style={{minHeight:"100vh",background:"#f0f4f8"}}>
+      {/* Header */}
       <div style={{background:TC,padding:"16px 24px",display:"flex",alignItems:"center",gap:12}}>
         <div style={{width:36,height:36,borderRadius:8,background:"rgba(255,255,255,.15)",
           display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>📊</div>
@@ -2071,13 +2080,11 @@ function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, sele
           <div style={{color:"#fff",fontWeight:700,fontSize:16}}>{TOOL_NAME}</div>
           <div style={{color:"rgba(255,255,255,.6)",fontSize:11}}>{ORG_BRAND}</div>
         </div>
-        {user?.role === "admin" && (
-          <button onClick={onReport}
-            style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
-              background:"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
-            📄 View Report
-          </button>
-        )}
+        <button onClick={onReport}
+          style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
+            background:"rgba(255,255,255,.12)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
+          📄 View Full Report
+        </button>
         <button onClick={onLogout}
           style={{padding:"8px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.25)",
             background:"transparent",color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:12}}>
@@ -2085,85 +2092,196 @@ function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, sele
         </button>
       </div>
 
-      <div style={{maxWidth:800,margin:"48px auto",padding:"0 16px"}}>
-        {/* Success hero */}
-        <div style={{background:"linear-gradient(135deg,#003087,#001f5c)",borderRadius:20,
-          padding:48,textAlign:"center",marginBottom:28,color:"#fff",
-          boxShadow:"0 8px 32px rgba(0,48,135,.25)"}}>
-          <div style={{fontSize:64,marginBottom:16}}>🎉</div>
-          <h1 style={{fontSize:26,fontWeight:800,margin:"0 0 8px"}}>Assessment Submitted!</h1>
-          <p style={{color:"rgba(255,255,255,.7)",fontSize:15,margin:"0 0 24px"}}>
-            Your assessment has been finalised and sent to your ITSM assessor.
-          </p>
-          <div style={{display:"inline-flex",gap:4,alignItems:"center",
-            background:"rgba(0,169,79,.2)",border:"1px solid rgba(0,169,79,.4)",
-            borderRadius:20,padding:"8px 20px"}}>
-            <span style={{color:"#4ade80",fontWeight:700,fontSize:14}}>🔒 Answers Locked — Read-Only</span>
+      <div style={{maxWidth:860,margin:"40px auto",padding:"0 16px"}}>
+
+        {/* ── Success Hero ── */}
+        <div style={{background:"linear-gradient(135deg,#003087 0%,#001f5c 60%,#005c2e 100%)",
+          borderRadius:20,padding:"40px 48px",textAlign:"center",marginBottom:24,color:"#fff",
+          boxShadow:"0 12px 40px rgba(0,48,135,.3)",position:"relative",overflow:"hidden"}}>
+          {/* Background decoration */}
+          <div style={{position:"absolute",top:-40,right:-40,width:200,height:200,
+            borderRadius:"50%",background:"rgba(255,255,255,.04)"}}/>
+          <div style={{position:"absolute",bottom:-60,left:-30,width:160,height:160,
+            borderRadius:"50%",background:"rgba(0,169,79,.08)"}}/>
+          <div style={{position:"relative",zIndex:1}}>
+            <div style={{width:72,height:72,borderRadius:"50%",background:"rgba(0,169,79,.2)",
+              border:"3px solid rgba(0,169,79,.5)",display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:36,margin:"0 auto 20px"}}>✅</div>
+            <h1 style={{fontSize:28,fontWeight:900,margin:"0 0 8px",letterSpacing:"-.3px"}}>
+              Assessment Successfully Submitted
+            </h1>
+            <p style={{color:"rgba(255,255,255,.7)",fontSize:14,margin:"0 0 28px",maxWidth:480,marginLeft:"auto",marginRight:"auto",lineHeight:1.7}}>
+              {n} practice{n!==1?"s":""} assessed and finalised.
+              Your ITSM Practice consultant has been notified and will prepare your detailed report.
+            </p>
+
+            {/* Score pill */}
+            <div style={{display:"inline-flex",gap:32,background:"rgba(255,255,255,.1)",
+              border:"1px solid rgba(255,255,255,.2)",borderRadius:16,padding:"16px 32px",marginBottom:20}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:36,fontWeight:900,color:avgScore>=4?"#4ade80":avgScore>=3?"#fbbf24":"#f87171"}}>{avgScore.toFixed(2)}</div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.6)",marginTop:2}}>Overall Score</div>
+              </div>
+              <div style={{width:1,background:"rgba(255,255,255,.2)"}}/>
+              <div style={{textAlign:"center",display:"flex",flexDirection:"column",justifyContent:"center"}}>
+                <div style={{fontSize:16,fontWeight:800,color:avgScore>=4?"#4ade80":avgScore>=3?"#fbbf24":"#f87171"}}>{maturityLabel(avgScore)}</div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.6)",marginTop:2}}>Maturity Level</div>
+              </div>
+              <div style={{width:1,background:"rgba(255,255,255,.2)"}}/>
+              <div style={{textAlign:"center",display:"flex",flexDirection:"column",justifyContent:"center"}}>
+                <div style={{fontSize:22,fontWeight:900,color:"#fff"}}>{n}</div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.6)",marginTop:2}}>Practices</div>
+              </div>
+            </div>
+
+            <div style={{display:"flex",justifyContent:"center",gap:8}}>
+              <div style={{background:"rgba(0,169,79,.2)",border:"1px solid rgba(0,169,79,.4)",
+                borderRadius:20,padding:"6px 16px",fontSize:12,fontWeight:700,color:"#4ade80"}}>
+                🔒 Answers Locked — Read Only
+              </div>
+              {companyProfile && (
+                <div style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.2)",
+                  borderRadius:20,padding:"6px 16px",fontSize:12,color:"rgba(255,255,255,.8)"}}>
+                  {companyProfile.companyName} · {companyProfile.industry}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Score summary */}
-        <div style={{background:"#fff",borderRadius:16,padding:32,marginBottom:20,
-          boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
-          <h2 style={{color:TC,fontSize:17,margin:"0 0 24px",fontWeight:700}}>Your Score Summary</h2>
-          {companyProfile && (
-            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 16px",marginBottom:20,
-              display:"flex",gap:24,flexWrap:"wrap"}}>
-              <div><span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>COMPANY</span>
-                <div style={{fontWeight:700,color:"#1e293b",fontSize:14}}>{companyProfile.companyName}</div></div>
-              <div><span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>INDUSTRY</span>
-                <div style={{fontWeight:700,color:"#1e293b",fontSize:14}}>{companyProfile.industry}</div></div>
-              <div><span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>SIZE</span>
-                <div style={{fontWeight:700,color:"#1e293b",fontSize:14}}>{companyProfile.employeeStrength}</div></div>
-            </div>
-          )}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:14,marginBottom:24}}>
-            <div style={{background:maturityColor(avgScore)+"11",borderRadius:12,padding:16,
-              textAlign:"center",border:`2px solid ${maturityColor(avgScore)}33`}}>
-              <div style={{fontSize:32,fontWeight:900,color:maturityColor(avgScore)}}>{avgScore.toFixed(2)}</div>
-              <div style={{fontSize:12,fontWeight:700,color:maturityColor(avgScore)}}>{maturityLabel(avgScore)}</div>
-              <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>Overall Score</div>
-            </div>
+        {/* ── Two column: dimension scores + top/bottom ── */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+          {/* Dimensional score card */}
+          <div style={{background:"#fff",borderRadius:14,padding:24,boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+            <h3 style={{fontSize:14,fontWeight:700,color:TC,margin:"0 0 16px"}}>Dimensional Score Breakdown</h3>
             {DIM_KEYS.map(dk => (
-              <div key={dk} style={{background:DIMS[dk].color+"11",borderRadius:12,padding:16,
-                textAlign:"center",border:`1px solid ${DIMS[dk].color}33`}}>
-                <div style={{fontSize:22,fontWeight:800,color:DIMS[dk].color}}>{dimAvgs[dk].toFixed(2)}</div>
-                <div style={{fontSize:11,fontWeight:700,color:DIMS[dk].color}}>{dk}</div>
-                <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{DIMS[dk].label}</div>
+              <div key={dk} style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <div>
+                    <span style={{fontWeight:800,color:DIMS[dk].color,fontSize:12}}>{dk}</span>
+                    <span style={{fontSize:11,color:"#94a3b8",marginLeft:6}}>{DIMS[dk].label}</span>
+                  </div>
+                  <span style={{fontWeight:800,color:DIMS[dk].color,fontSize:14}}>{dimAvgs[dk].toFixed(2)}</span>
+                </div>
+                <div style={{background:"#f1f5f9",borderRadius:999,height:8,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${((dimAvgs[dk]-1)/4)*100}%`,
+                    background:DIMS[dk].color,borderRadius:999,transition:"width .3s"}}/>
+                </div>
+                <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{maturityLabel(dimAvgs[dk])}</div>
               </div>
             ))}
           </div>
-          <div style={{borderTop:"1px solid #f1f5f9",paddingTop:16}}>
-            <h3 style={{fontSize:14,fontWeight:700,color:"#334155",marginBottom:12}}>Practice Scores</h3>
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {practiceRows.sort((a,b)=>scores[b.id]-scores[a.id]).map(p => (
-                <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,
-                  padding:"8px 12px",background:"#f8fafc",borderRadius:8}}>
-                  <div style={{flex:1,fontSize:13,color:"#334155",fontWeight:500}}>{p.name}</div>
-                  <div style={{fontSize:11,color:"#94a3b8",textTransform:"capitalize"}}>{levels[p.id]}</div>
-                  <div style={{fontWeight:700,color:maturityColor(scores[p.id]),fontSize:14,minWidth:36,textAlign:"right"}}>
-                    {scores[p.id].toFixed(1)}
-                  </div>
-                  <div style={{fontSize:11,color:maturityColor(scores[p.id]),minWidth:80,textAlign:"right"}}>
-                    {maturityLabel(scores[p.id])}
-                  </div>
+
+          {/* Top/Bottom practices */}
+          <div style={{background:"#fff",borderRadius:14,padding:24,boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+            <h3 style={{fontSize:14,fontWeight:700,color:TC,margin:"0 0 12px"}}>Highlights</h3>
+            <div style={{fontSize:10,fontWeight:700,color:"#15803d",textTransform:"uppercase",letterSpacing:".8px",marginBottom:8}}>
+              ✓ Top Strengths
+            </div>
+            {topP.map((p,i) => (
+              <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,
+                padding:"7px 10px",background:maturityColor(scores[p.id])+"11",
+                borderRadius:8,borderLeft:`3px solid ${maturityColor(scores[p.id])}`}}>
+                <span style={{fontSize:11,color:"#94a3b8",minWidth:16}}>{i+1}</span>
+                <span style={{flex:1,fontSize:12,fontWeight:600,color:"#1e293b"}}>{p.name}</span>
+                <span style={{fontWeight:800,color:maturityColor(scores[p.id]),fontSize:13}}>{scores[p.id].toFixed(1)}</span>
+              </div>
+            ))}
+            <div style={{fontSize:10,fontWeight:700,color:"#dc2626",textTransform:"uppercase",letterSpacing:".8px",margin:"12px 0 8px"}}>
+              ⚠ Priority Gaps
+            </div>
+            {bottomP.map((p,i) => (
+              <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,
+                padding:"7px 10px",background:"#fee2e211",borderRadius:8,
+                borderLeft:`3px solid ${maturityColor(scores[p.id])}`}}>
+                <span style={{fontSize:11,color:"#94a3b8",minWidth:16}}>{i+1}</span>
+                <span style={{flex:1,fontSize:12,fontWeight:600,color:"#1e293b"}}>{p.name}</span>
+                <span style={{fontWeight:800,color:maturityColor(scores[p.id]),fontSize:13}}>{scores[p.id].toFixed(1)}</span>
+                <span style={{fontSize:10,color:"#dc2626"}}>+{Math.max(0,4-scores[p.id]).toFixed(1)} to L4</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── All practice scores ── */}
+        <div style={{background:"#fff",borderRadius:14,padding:24,marginBottom:16,
+          boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <h3 style={{fontSize:14,fontWeight:700,color:TC,margin:0}}>All Practice Scores ({n})</h3>
+            {n > 6 && (
+              <button onClick={() => setShowAll(v=>!v)}
+                style={{fontSize:12,color:TC,background:"none",border:"none",cursor:"pointer",fontWeight:600}}>
+                {showAll ? "Show Less" : `Show All ${n}`}
+              </button>
+            )}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {(showAll ? practiceRows : practiceRows.slice().sort((a,b)=>scores[b.id]-scores[a.id]).slice(0,6))
+              .sort((a,b)=>scores[b.id]-scores[a.id])
+              .map(p => (
+              <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,
+                padding:"8px 12px",background:"#f8fafc",borderRadius:8}}>
+                <div style={{flex:1,fontSize:12,color:"#334155",fontWeight:500}}>{p.name}</div>
+                <div style={{fontSize:10,color:"#94a3b8",textTransform:"capitalize",minWidth:70}}>{levels[p.id]}</div>
+                {/* Mini dim badges */}
+                <div style={{display:"flex",gap:3}}>
+                  {DIM_KEYS.map(dk => (
+                    <span key={dk} style={{fontSize:9,padding:"1px 4px",borderRadius:3,
+                      background:DIMS[dk].color+"22",color:DIMS[dk].color,fontWeight:700}}>
+                      {dk}:{(dimScores[p.id]?.[dk]||1).toFixed(1)}
+                    </span>
+                  ))}
                 </div>
-              ))}
+                <div style={{fontWeight:800,color:maturityColor(scores[p.id]),fontSize:14,minWidth:34,textAlign:"right"}}>
+                  {scores[p.id].toFixed(1)}
+                </div>
+                <div style={{fontSize:11,color:maturityColor(scores[p.id]),minWidth:90,textAlign:"right"}}>
+                  {maturityLabel(scores[p.id])}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── What Happens Next ── */}
+        <div style={{background:"#fff",borderRadius:14,padding:24,boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+          <h3 style={{fontSize:14,fontWeight:700,color:TC,margin:"0 0 16px"}}>What Happens Next</h3>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {[
+              { icon:"🔍", step:"1", title:"Assessment Review", desc:"Your consultant reviews all submitted answers and scores, cross-referencing industry benchmarks.", status:"In Progress", color:"#3b82f6" },
+              { icon:"📊", step:"2", title:"Report Preparation", desc:"A full PDF maturity report with dimensional analysis, gap analysis, and strategic roadmap is prepared.", status:"Pending", color:"#f97316" },
+              { icon:"📧", step:"3", title:"Delivery & Briefing", desc:"The report is delivered within 2–3 business days, with an optional executive briefing session available.", status:"Scheduled", color:"#22c55e" },
+              { icon:"🚀", step:"4", title:"Transformation Planning", desc:"Based on findings, your ITSM Practice consultant will propose an engagement roadmap aligned to your business priorities.", status:"Upcoming", color:"#a855f7" },
+            ].map(s => (
+              <div key={s.step} style={{display:"flex",gap:14,padding:"14px 16px",
+                background:s.step==="1"?s.color+"0d":"#f8fafc",borderRadius:10,
+                border:`1px solid ${s.step==="1"?s.color+"33":"#e2e8f0"}`}}>
+                <div style={{width:36,height:36,borderRadius:10,background:s.color+"22",
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</div>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:3}}>
+                    <div style={{fontWeight:700,color:"#1e293b",fontSize:13}}>{s.title}</div>
+                    <span style={{fontSize:10,padding:"2px 8px",borderRadius:20,
+                      background:s.color+"22",color:s.color,fontWeight:700,flexShrink:0,marginLeft:8}}>
+                      {s.status}
+                    </span>
+                  </div>
+                  <div style={{fontSize:12,color:"#64748b",lineHeight:1.5}}>{s.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{marginTop:20,padding:"14px 16px",background:"#f0f9ff",
+            border:"1px solid #bae6fd",borderRadius:10,display:"flex",gap:12,alignItems:"center"}}>
+            <div style={{fontSize:20}}>📞</div>
+            <div style={{fontSize:12,color:"#0c4a6e"}}>
+              <strong>Need urgent support?</strong> Contact your ITSM Practice account manager directly,
+              or email <strong>contact@itsmpractice.com</strong> with your submission reference.
             </div>
           </div>
         </div>
 
-        <div style={{background:"#fff3cd",border:"1px solid #ffc107",borderRadius:12,padding:"16px 20px",
-          display:"flex",gap:12,alignItems:"flex-start"}}>
-          <div style={{fontSize:20}}>📧</div>
-          <div>
-            <div style={{fontWeight:700,color:"#856404",fontSize:14,marginBottom:4}}>What happens next?</div>
-            <div style={{fontSize:13,color:"#664d03"}}>
-              Your ITSM Practice consultant will review your submission and prepare a full
-              PDF report with detailed recommendations. Expect to receive it within 2–3 business days.
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -2484,7 +2602,7 @@ function DimRadar({ dimData }) {
    Risk Register · Recommendations · Roadmap · ROI · ITIL5/AI · Appendix
 ═══════════════════════════════════════════════════════════════════ */
 
-function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfile }) {
+function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfile, qb }) {
   const practiceRows = PRACTICES.filter(p => scores[p.id] != null);
   const n = practiceRows.length;
   const avgScore = n > 0 ? practiceRows.reduce((s,p)=>s+scores[p.id],0)/n : 0;
@@ -2555,6 +2673,20 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
 
   /* ── ITIL5 / AI Readiness score ── */
   const aiReadiness = Math.round((dimAvgs.CI * 0.3 + dimAvgs.MM * 0.3 + dimAvgs.TI * 0.4) * 20);
+
+  /* ── Key Findings ── */
+  const topPractices    = [...practiceRows].sort((a,b)=>scores[b.id]-scores[a.id]).slice(0,3);
+  const bottomPractices = [...practiceRows].sort((a,b)=>scores[a.id]-scores[b.id]).slice(0,3);
+  const weakestDim      = DIM_KEYS.reduce((w,dk)=>(dimAvgs[dk]||1)<(dimAvgs[w]||1)?dk:w, DIM_KEYS[0]);
+  const strongestDim    = DIM_KEYS.reduce((s,dk)=>(dimAvgs[dk]||1)>(dimAvgs[s]||1)?dk:s, DIM_KEYS[0]);
+
+  /* ── Evidence prompts per practice (from qb, at assessed level) ── */
+  function getEvidencePrompts(practiceId) {
+    if (!qb) return [];
+    const lvl = levels[practiceId] || "beginner";
+    const qs  = qb[practiceId]?.[lvl] || [];
+    return qs.map(q=>q.evidence).filter(Boolean).slice(0,5);
+  }
 
   /* ════════════════ SVG HELPERS ════════════════ */
   function radarSVG(data, w=280, h=280) {
@@ -2828,18 +2960,19 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
   <h2 style="font-size:28px;color:#003087;margin-bottom:8px;">Table of Contents</h2>
   <p style="color:#64748b;margin-bottom:40px;">This report has been prepared exclusively for the Board and C-Suite leadership team.</p>
   ${[
-    ["01","Executive Briefing","CEO · CIO · CISO Summary","3"],
+    ["01","Executive Briefing","CEO · CIO · CISO Summary · Key Findings","3"],
     ["02","Assessment Methodology","Framework, Scoring, Dimensions","4"],
     ["03","Current State Analysis","Overall Maturity, Group Scores, Distribution","5"],
     ["04","Dimensional Analysis","PE · PC · MM · CI · TI Deep Dive","6"],
     ["05","Practice Performance Heatmap","All 34 Practices Scored","7"],
-    ["06","Gap Analysis","Current vs Target · Priority Matrix","8"],
-    ["07","Risk Register","Risk Identification, Rating, Exposure","9"],
-    ["08","Strategic Recommendations","Quick Wins · Medium · Long Term","10"],
-    ["09","Implementation Roadmap","3-Phase Plan · Milestones · Resources","11"],
-    ["10","ROI & Business Case","Investment, Savings, Payback, NPV","12"],
-    ["11","ITIL 5 & AI Readiness","Future Proofing · AI Adaptation Steps","13"],
-    ["12","Appendix","Full Data, Methodology, Contacts","14"],
+    ["06","Practice Evidence & Dimensional Scores","Per-Practice Dimension Breakdown · Evidence Prompts","8"],
+    ["07","Gap Analysis","Current vs Target · Priority Matrix","9"],
+    ["08","Risk Register","Risk Identification, Rating, Exposure","10"],
+    ["09","Strategic Recommendations","Quick Wins · Medium · Long Term","11"],
+    ["10","Implementation Roadmap","3-Phase Plan · Milestones · Resources","12"],
+    ["11","ROI & Business Case","Investment, Savings, Payback, NPV","13"],
+    ["12","ITIL 5 & AI Readiness","Future Proofing · AI Adaptation Steps","14"],
+    ["13","Appendix","Full Data, Methodology, Contacts","15"],
   ].map(([num,title,sub,pg])=>`
     <div class="toc-row">
       <div class="toc-num">${num}</div>
@@ -2923,6 +3056,41 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
         <div style="font-size:48px;font-weight:900;text-align:center;color:${maturityColor(scores['info_security_mgmt']||1)}">${(scores['info_security_mgmt']||0).toFixed(1)}</div>
         <div style="font-size:13px;font-weight:700;text-align:center;color:${maturityColor(scores['info_security_mgmt']||1)}">${maturityLabel(scores['info_security_mgmt']||1)}</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Key Findings at a Glance -->
+  <div style="margin-top:24px;" class="avoid-break">
+    <h3 style="margin-bottom:14px;">📌 Key Findings at a Glance</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div>
+        <div style="font-size:10px;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">✓ Top Performing Practices</div>
+        ${topPractices.map((p,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:${maturityColor(scores[p.id])}11;border-radius:8px;margin-bottom:6px;border-left:3px solid ${maturityColor(scores[p.id])};">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;min-width:16px;">${i+1}</div>
+          <div style="flex:1;font-size:12px;font-weight:600;color:#1e293b;">${p.name}</div>
+          <div style="font-weight:900;color:${maturityColor(scores[p.id])};font-size:14px;">${scores[p.id].toFixed(2)}</div>
+          <div style="font-size:10px;color:${maturityColor(scores[p.id])};">${maturityLabel(scores[p.id])}</div>
+        </div>`).join("")}
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">⚠ Highest Priority Gaps</div>
+        ${bottomPractices.map((p,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fee2e211;border-radius:8px;margin-bottom:6px;border-left:3px solid ${maturityColor(scores[p.id])};">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;min-width:16px;">${i+1}</div>
+          <div style="flex:1;font-size:12px;font-weight:600;color:#1e293b;">${p.name}</div>
+          <div style="font-weight:900;color:${maturityColor(scores[p.id])};font-size:14px;">${scores[p.id].toFixed(2)}</div>
+          <div style="font-size:10px;color:#dc2626;">Gap: +${Math.max(0,4-scores[p.id]).toFixed(2)}</div>
+        </div>`).join("")}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:16px;">
+      ${DIM_KEYS.map(dk=>{const v=dimAvgs[dk]||1;const isWeak=dk===weakestDim;const isStrong=dk===strongestDim;return`
+      <div style="padding:12px;border-radius:10px;text-align:center;background:${isWeak?'#fee2e2':isStrong?'#dcfce7':'#f8fafc'};border:2px solid ${isWeak?'#fca5a5':isStrong?'#86efac':DIMS[dk].color+'33'};">
+        <div style="font-size:20px;font-weight:900;color:${DIMS[dk].color};">${v.toFixed(2)}</div>
+        <div style="font-size:11px;font-weight:800;color:${DIMS[dk].color};margin:2px 0;">${dk}</div>
+        <div style="font-size:9px;color:#64748b;line-height:1.3;">${DIMS[dk].label}</div>
+        ${isWeak?'<div style="font-size:9px;font-weight:700;color:#dc2626;margin-top:4px;">⚠ Weakest</div>':''}
+        ${isStrong?'<div style="font-size:9px;font-weight:700;color:#15803d;margin-top:4px;">✓ Strongest</div>':''}
+      </div>`;}).join("")}
     </div>
   </div>
 </div>`;
@@ -3137,10 +3305,64 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
     </div>`;}).join("")}
 </div>`;
 
+  /* ════════════════ PRACTICE EVIDENCE & DIMENSIONAL DETAIL ════════════════ */
+  const practiceDetailPage = `
+<div class="section page-break">
+  <div class="section-label">Section 06</div>
+  <h2>Practice Evidence &amp; Dimensional Scores</h2>
+  <p>Each assessed practice is shown with its five dimensional scores and the evidence prompts used during assessment. Evidence prompts indicate what artifacts, data, or demonstrations were sought to validate responses.</p>
+
+  ${GROUPS.map(g=>{
+    const gp=practiceRows.filter(p=>PRACTICES.find(x=>x.id===p.id)?.group===g);
+    if(!gp.length) return "";
+    return `<div style="margin-bottom:32px;" class="avoid-break">
+      <h3 style="margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e2e8f0;">${g}</h3>
+      ${gp.map(p=>{
+        const sc=scores[p.id]; const dim=dimScores[p.id]||{}; const lv=levels[p.id]||"beginner";
+        const lvBg={beginner:"#dcfce7",practitioner:"#fef9c3",expert:"#fee2e2"};
+        const lvCol={beginner:"#15803d",practitioner:"#92400e",expert:"#991b1b"};
+        const evidenceList=getEvidencePrompts(p.id);
+        const worstDk=DIM_KEYS.reduce((b,dk)=>(dim[dk]||1)<(dim[b]||1)?dk:b,DIM_KEYS[0]);
+        return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;margin-bottom:14px;border-left:4px solid ${maturityColor(sc)};">
+          <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:200px;">
+              <div style="font-size:14px;font-weight:800;color:#1e293b;margin-bottom:4px;">${p.name}</div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span class="badge" style="background:${lvBg[lv]||"#f1f5f9"};color:${lvCol[lv]||"#475569"};">${lv.charAt(0).toUpperCase()+lv.slice(1)}</span>
+                <span style="font-size:11px;color:#64748b;">${p.group}</span>
+                ${(TARGET-sc)>0?`<span style="font-size:11px;color:#dc2626;font-weight:600;">Gap to L4: +${(TARGET-sc).toFixed(2)}</span>`:`<span style="font-size:11px;color:#15803d;font-weight:600;">✓ On Target</span>`}
+              </div>
+            </div>
+            <div style="text-align:right;flex-shrink:0;">
+              <div style="font-size:28px;font-weight:900;color:${maturityColor(sc)};line-height:1;">${sc.toFixed(2)}</div>
+              <div style="font-size:11px;color:${maturityColor(sc)};font-weight:700;">${maturityLabel(sc)}</div>
+            </div>
+          </div>
+          <!-- Dimensional scores bar -->
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:12px;">
+            ${DIM_KEYS.map(dk=>{const v=dim[dk]||1;const isW=dk===worstDk;return`<div style="background:${isW?'#fee2e2':'#f8fafc'};border-radius:8px;padding:8px;text-align:center;border:1px solid ${isW?'#fca5a5':DIMS[dk].color+'33'};">
+              <div style="font-size:14px;font-weight:900;color:${DIMS[dk].color};">${v.toFixed(2)}</div>
+              <div style="font-size:10px;font-weight:800;color:${DIMS[dk].color};">${dk}</div>
+              <div style="font-size:8px;color:#94a3b8;line-height:1.2;margin-top:2px;">${DIMS[dk].label.replace(" ","<br/>")}</div>
+              <div style="height:4px;background:#e2e8f0;border-radius:2px;margin-top:4px;overflow:hidden;"><div style="height:100%;width:${((v-1)/4)*100}%;background:${DIMS[dk].color};border-radius:2px;"></div></div>
+              ${isW?'<div style="font-size:8px;color:#dc2626;font-weight:700;margin-top:3px;">⚠ Weakest</div>':''}
+            </div>`;}).join("")}
+          </div>
+          <!-- Evidence prompts -->
+          ${evidenceList.length>0?`<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px 14px;">
+            <div style="font-size:10px;font-weight:700;color:#0284c7;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">🔍 Evidence Collected / To Verify</div>
+            ${evidenceList.map(ev=>`<div style="display:flex;gap:8px;margin-bottom:4px;font-size:11px;color:#334155;">
+              <span style="color:#0284c7;flex-shrink:0;">▸</span><span>${ev}</span>
+            </div>`).join("")}
+          </div>`:`<div style="font-size:11px;color:#94a3b8;font-style:italic;">Evidence prompts not available (load question-bank.xlsx for full detail).</div>`}
+        </div>`;}).join("")}
+    </div>`;}).join("")}
+</div>`;
+
   /* ════════════════ GAP ANALYSIS ════════════════ */
   const gapPage = `
 <div class="section page-break">
-  <div class="section-label">Section 06</div>
+  <div class="section-label">Section 07</div>
   <h2>Gap Analysis</h2>
   <p>Target benchmark: <strong>Level 4.0 (Quantitatively Managed)</strong> — consistent with top-quartile ITSM organisations and mandatory for AI-augmented operations. Gaps are calculated as Target (4.0) minus Current Score.</p>
 
@@ -3200,7 +3422,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
   /* ════════════════ RISK REGISTER ════════════════ */
   const riskPage = `
 <div class="section page-break">
-  <div class="section-label">Section 07</div>
+  <div class="section-label">Section 08</div>
   <h2>Risk Register</h2>
   <p>Risks are auto-derived from maturity gaps and dimensional weaknesses. Rating = Likelihood × Impact (1–4 scale). Ratings ≥12 are Critical; 8–11 are High; below 8 are Medium.</p>
 
@@ -3262,7 +3484,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
   /* ════════════════ STRATEGIC RECOMMENDATIONS ════════════════ */
   const recsPage = `
 <div class="section page-break">
-  <div class="section-label">Section 08</div>
+  <div class="section-label">Section 09</div>
   <h2>Strategic Recommendations</h2>
   <p>Recommendations are derived directly from gap analysis and risk scoring. They are sequenced to maximise risk reduction while building on each prior phase.</p>
 
@@ -3330,7 +3552,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
   /* ════════════════ ROADMAP ════════════════ */
   const roadmapPage = `
 <div class="section page-break">
-  <div class="section-label">Section 09</div>
+  <div class="section-label">Section 10</div>
   <h2>Implementation Roadmap</h2>
   <p>A structured 24-month transformation journey from current state (${maturityLabel(avgScore)} — ${avgScore.toFixed(2)}) to target state (Quantitatively Managed — 4.0+). Each phase builds on the prior, with measurable milestones and governance checkpoints.</p>
 
@@ -3384,7 +3606,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
   /* ════════════════ ROI ════════════════ */
   const roiPage = `
 <div class="section page-break">
-  <div class="section-label">Section 10</div>
+  <div class="section-label">Section 11</div>
   <h2>Return on Investment & Business Case</h2>
   <p>ROI projections are modelled on industry benchmarks for ITSM transformation programmes of comparable scope. Figures should be validated against organisational headcount and incident volumes during programme scoping.</p>
 
@@ -3458,7 +3680,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
   /* ════════════════ ITIL 5 / AI READINESS ════════════════ */
   const itil5Page = `
 <div class="section page-break">
-  <div class="section-label">Section 11</div>
+  <div class="section-label">Section 12</div>
   <h2>ITIL 5 & Artificial Intelligence Readiness</h2>
 
   <div class="insight-box" style="margin-bottom:28px;">
@@ -3531,7 +3753,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
   /* ════════════════ APPENDIX ════════════════ */
   const appendixPage = `
 <div class="section page-break">
-  <div class="section-label">Section 12</div>
+  <div class="section-label">Section 13</div>
   <h2>Appendix — Full Assessment Data</h2>
 
   <h3 style="margin-bottom:12px;">Complete Practice Score Table</h3>
@@ -3605,6 +3827,7 @@ function generatePDFHTML({ scores, dimScores, levels, username, ts, companyProfi
   ${currentStatePage}
   ${dimensionalPage}
   ${heatmapPage}
+  ${practiceDetailPage}
   ${gapPage}
   ${riskPage}
   ${recsPage}
@@ -3629,7 +3852,7 @@ function printReport(data) {
 }
 
 /* ─── ReportView ─────────────────────────────────────────────────── */
-function ReportView({ scores, dimScores, levels, reportData, historyList, onBack, onLogout, user, companyProfile, cloudSaving, cloudUrl, onSaveToCloud }) {
+function ReportView({ scores, dimScores, levels, reportData, historyList, onBack, onLogout, user, companyProfile, cloudSaving, cloudUrl, onSaveToCloud, qb }) {
   const [tab, setTab] = useState("overview");
   const [selPractice, setSelPractice] = useState(null);
   const isAdmin = user?.role === "admin";
@@ -3693,7 +3916,7 @@ function ReportView({ scores, dimScores, levels, reportData, historyList, onBack
         </div>
         {/* BUG 4 — Print/PDF only for admin */}
         {isAdmin && (
-          <button onClick={()=>printReport({scores,dimScores,levels,username:user?.username,ts:Date.now(),companyProfile})}
+          <button onClick={()=>printReport({scores,dimScores,levels,username:user?.username,ts:Date.now(),companyProfile,qb})}
             style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
               background:"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
             🖨️ Print / PDF
