@@ -679,6 +679,16 @@ export default function App() {
         onLogout={logout} user={user} companyProfile={companyProfile}
         cloudSaving={cloudSaving} cloudUrl={cloudUrl} onSaveToCloud={saveToCloud}
         qb={qb} />}
+      {/* Global footer */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:8000,
+        background:"rgba(0,30,87,.92)",backdropFilter:"blur(8px)",
+        borderTop:"1px solid rgba(255,255,255,.08)",
+        padding:"6px 20px",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <span style={{fontSize:11,color:"rgba(255,255,255,.45)",letterSpacing:".3px"}}>
+          Developed by <strong style={{color:"rgba(255,255,255,.7)",fontWeight:600}}>Gagandeep Singh</strong>
+          &nbsp;·&nbsp; {TOOL_NAME} · {ORG_BRAND} · {VERSION}
+        </span>
+      </div>
     </div>
   );
 }
@@ -1629,13 +1639,6 @@ function Welcome({ user, completedCount, totalCount, onStart, onLogout, onAdmin,
             {completedCount>0 ? "Continue Assessment →" : "Start Assessment →"}
           </button>
         )}
-        {completedCount>0 && (
-          <button onClick={onReport} style={{width:"100%",padding:"12px",borderRadius:10,
-            border:"1px solid rgba(255,255,255,.4)",background:"transparent",color:"#fff",
-            fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:12}}>
-            View Report
-          </button>
-        )}
         <button onClick={onLogout} style={{width:"100%",padding:"10px",borderRadius:8,
           border:"1px solid rgba(255,255,255,.3)",background:"transparent",
           color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:13}}>Sign Out</button>
@@ -1674,10 +1677,6 @@ function PracticeSelect({ scores, dimScores, onSelect, onBack, user, onLogout, o
             {submitted && " · 🔒 Submitted"}
           </div>
         </div>
-        {completedCount>0 && (
-          <button onClick={onReport} style={{padding:"7px 14px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
-            background:"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>📄 Report</button>
-        )}
         <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.25)",
           background:"transparent",color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:12}}>Sign Out</button>
       </div>
@@ -2278,8 +2277,7 @@ function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, sele
             border:"1px solid #bae6fd",borderRadius:10,display:"flex",gap:12,alignItems:"center"}}>
             <div style={{fontSize:20}}>📞</div>
             <div style={{fontSize:12,color:"#0c4a6e"}}>
-              <strong>Need urgent support?</strong> Contact your ITSM Practice account manager directly,
-              or email <strong>contact@itsmpractice.com</strong> with your submission reference.
+              <strong>Need urgent support?</strong> Contact your ITSM Practice Consultant <strong>Gagandeep Singh</strong> directly.
             </div>
           </div>
         </div>
