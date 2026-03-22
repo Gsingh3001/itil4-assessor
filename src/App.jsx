@@ -716,6 +716,42 @@ function ModalDialog({ title, msg, onOk, onClose }) {
 function UserLogin({ onLogin, onAdmin }) {
   const [u, setU] = useState(""); const [p, setP] = useState("");
   const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
+
+  // Inject fonts once
+  useEffect(() => {
+    if (!document.getElementById("login-fonts")) {
+      const link = document.createElement("link");
+      link.id = "login-fonts";
+      link.rel = "stylesheet";
+      link.href = "https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800;900&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap";
+      document.head.appendChild(link);
+    }
+    const style = document.createElement("style");
+    style.id = "login-input-style";
+    style.textContent = `
+      .login-input { background:rgba(255,255,255,0.05); border:1px solid rgba(180,197,255,0.15);
+        color:#fff !important; width:100%; padding:14px 16px; border-radius:10px; font-size:14px;
+        box-sizing:border-box; transition:border-color .2s,box-shadow .2s; outline:none; }
+      .login-input::placeholder { color:rgba(180,197,255,0.35); }
+      .login-input:focus { border-color:#009BDE; box-shadow:0 0 0 3px rgba(0,155,222,0.18); }
+      .login-input:disabled { opacity:.5; }
+      .login-btn-primary { background:linear-gradient(135deg,#003087 0%,#009BDE 100%);
+        box-shadow:0 8px 32px rgba(0,155,222,0.35), inset 0 0 0 1px rgba(255,255,255,0.08);
+        color:#fff; width:100%; height:52px; border-radius:12px; border:none; font-size:15px;
+        font-weight:800; letter-spacing:.04em; cursor:pointer; transition:filter .2s,transform .1s;
+        display:flex; align-items:center; justify-content:center; gap:8px; }
+      .login-btn-primary:hover:not(:disabled) { filter:brightness(1.12); }
+      .login-btn-primary:active:not(:disabled) { transform:scale(.98); }
+      .login-btn-primary:disabled { opacity:.6; cursor:not-allowed; }
+      .login-admin-btn { display:flex; align-items:center; gap:8px; font-size:12px;
+        color:rgba(180,197,255,0.4); border:1px solid rgba(180,197,255,0.12); border-radius:8px;
+        padding:8px 16px; background:transparent; cursor:pointer; transition:color .2s,background .2s; }
+      .login-admin-btn:hover { color:rgba(180,197,255,0.85); background:rgba(180,197,255,0.06); }
+    `;
+    if (!document.getElementById("login-input-style")) document.head.appendChild(style);
+    return () => {};
+  }, []);
+
   async function handle() {
     if (!u.trim() || !p.trim()) { setErr("Enter username and password."); return; }
     setLoading(true); setErr("");
@@ -723,43 +759,194 @@ function UserLogin({ onLogin, onAdmin }) {
     setLoading(false);
     if (!ok) setErr("Invalid username or password.");
   }
+
   return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
-      background:`linear-gradient(135deg,${TC} 0%,#001f5c 100%)`}}>
-      <div style={{background:"#fff",borderRadius:16,padding:40,width:360,boxShadow:"0 20px 60px rgba(0,0,0,.4)"}}>
-        <button onClick={onAdmin} disabled={loading}
-          style={{width:"100%",padding:"10px",borderRadius:8, marginBottom: 20,
-            border:"1px solid #e2e8f0",background:"transparent",cursor:"pointer",fontSize:13,color:TC, fontWeight:700}}>
-          🔑 Admin Portal Login
-        </button>
+    <div style={{minHeight:"100vh",display:"flex",background:"#0f1224",fontFamily:"'Inter',system-ui,sans-serif",
+      overflow:"hidden",position:"relative"}}>
 
-        {err && <div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",
-          padding:"10px 14px",borderRadius:8,marginBottom:16,fontSize:13}}>{err}</div>}
-        <div style={{marginBottom:16}}>
-          <label style={{fontSize:12,fontWeight:600,color:"#475569",display:"block",marginBottom:6}}>USERNAME</label>
-          <input value={u} onChange={e=>setU(e.target.value)} placeholder="Enter username"
-            onKeyDown={e=>e.key==="Enter"&&handle()} disabled={loading}
-            style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",
-              fontSize:14,boxSizing:"border-box",outline:"none"}} />
+      {/* ── LEFT PANEL 55% ── */}
+      <aside style={{width:"55%",minHeight:"100vh",position:"relative",display:"flex",flexDirection:"column",
+        justifyContent:"center",padding:"0 96px",overflow:"hidden"}}>
+        {/* bg orbs */}
+        <div style={{position:"absolute",inset:0,pointerEvents:"none"}}>
+          <div style={{position:"absolute",top:"-25%",left:"-25%",width:600,height:600,
+            background:"radial-gradient(circle,rgba(0,48,135,.35) 0%,transparent 70%)",opacity:.6}}/>
+          <div style={{position:"absolute",bottom:"-25%",right:"-25%",width:400,height:400,
+            background:"radial-gradient(circle,rgba(0,155,222,.12) 0%,transparent 70%)",opacity:.4}}/>
+          <div style={{position:"absolute",inset:0,opacity:.02,
+            backgroundImage:"radial-gradient(#8bceff 1px,transparent 1px)",backgroundSize:"40px 40px"}}/>
         </div>
-        <div style={{marginBottom:24}}>
-          <label style={{fontSize:12,fontWeight:600,color:"#475569",display:"block",marginBottom:6}}>PASSWORD</label>
-          <input type="password" value={p} onChange={e=>setP(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="Enter password" disabled={loading}
-            style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #e2e8f0",
-              fontSize:14,boxSizing:"border-box",outline:"none"}} />
-        </div>
-        <button onClick={handle} disabled={loading}
-          style={{width:"100%",padding:"12px",borderRadius:8,border:"none",
-            background:loading?"#94a3b8":TC,color:"#fff",fontSize:15,fontWeight:600,
-            cursor:loading?"not-allowed":"pointer"}}>
-          {loading ? "Signing in…" : "Sign In"}
-        </button>
 
-        <p style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:20,marginBottom:0}}>
-          ITIL 4 Process Maturity Assessment · {ORG_BRAND}
-        </p>
-      </div>
+        <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",gap:36}}>
+          {/* Badge */}
+          <div>
+            <span style={{display:"inline-flex",alignItems:"center",padding:"6px 16px",
+              borderRadius:999,background:"rgba(0,155,222,.1)",border:"1px solid rgba(0,155,222,.3)",
+              color:"#009BDE",fontSize:10,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase"}}>
+              ITIL 4 Certified Framework · 34 Practices
+            </span>
+          </div>
+
+          {/* Headline */}
+          <div style={{lineHeight:1}}>
+            <div style={{fontSize:56,fontWeight:900,color:"#fff",fontFamily:"'Manrope',sans-serif",lineHeight:1.05}}>
+              Measure What
+            </div>
+            <div style={{fontSize:72,fontWeight:900,fontFamily:"'Manrope',sans-serif",lineHeight:1,
+              background:"linear-gradient(135deg,#b4c5ff,#009BDE)",
+              WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
+              Matters.
+            </div>
+          </div>
+
+          {/* Sub */}
+          <p style={{fontSize:17,color:"rgba(255,255,255,.55)",lineHeight:1.7,maxWidth:420,margin:0}}>
+            Transform ITSM maturity from gut-feel to boardroom-grade intelligence.
+          </p>
+
+          <div style={{width:60,height:1,background:"rgba(180,197,255,.1)"}}/>
+
+          {/* Value props */}
+          <div style={{display:"flex",flexDirection:"column",gap:20,maxWidth:500}}>
+            {[
+              ["⚡","34 ITIL 4 Practices","Comprehensive maturity scoring across the entire Service Value System."],
+              ["📊","Five Dimensions","Process Existence · Consistency · Measurement · Improvement · Tool Integration"],
+              ["🏆","Boardroom-Ready Reports","PDF reports benchmarked against Gartner, Deloitte and KPMG industry standards."],
+            ].map(([icon,title,desc]) => (
+              <div key={title} style={{display:"flex",alignItems:"flex-start",gap:16}}>
+                <div style={{width:32,height:32,borderRadius:8,background:"rgba(0,155,222,.1)",
+                  display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16}}>
+                  {icon}
+                </div>
+                <div>
+                  <div style={{color:"#b4c5ff",fontSize:13,fontWeight:700,lineHeight:1.3}}>{title}</div>
+                  <div style={{color:"rgba(255,255,255,.45)",fontSize:12,lineHeight:1.5,marginTop:3}}>{desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Industry tags */}
+          <div style={{paddingTop:8}}>
+            <p style={{fontSize:10,color:"rgba(180,197,255,.3)",textTransform:"uppercase",
+              letterSpacing:".12em",fontWeight:600,marginBottom:10}}>Trusted by IT leaders...</p>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {["Financial Services","Healthcare","Government","Technology"].map(t=>(
+                <span key={t} style={{padding:"4px 12px",borderRadius:4,background:"rgba(255,255,255,.05)",
+                  color:"rgba(255,255,255,.4)",fontSize:10,fontWeight:500}}>{t}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── RIGHT PANEL 45% ── */}
+      <main style={{width:"45%",minHeight:"100vh",display:"flex",alignItems:"center",
+        justifyContent:"center",padding:"0 48px",position:"relative",background:"#0f1224"}}>
+        {/* glow */}
+        <div style={{position:"absolute",width:500,height:500,top:"50%",left:"50%",
+          transform:"translate(-50%,-50%)",
+          background:"radial-gradient(circle,rgba(0,155,222,.08) 0%,transparent 70%)",
+          pointerEvents:"none"}}/>
+
+        {/* Glass card */}
+        <div style={{width:"100%",maxWidth:420,borderRadius:24,padding:"48px 52px",
+          background:"rgba(27,31,48,.85)",backdropFilter:"blur(32px)",
+          border:"1px solid rgba(180,197,255,.12)",
+          boxShadow:"0 40px 100px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04)",
+          position:"relative",zIndex:1}}>
+
+          {/* Logo area */}
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:12,marginBottom:0}}>
+            <div style={{width:48,height:48,borderRadius:"50%",
+              background:"rgba(0,155,222,.2)",border:"1px solid rgba(0,155,222,.3)",
+              boxShadow:"0 0 20px rgba(0,155,222,.4)",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🛡️</div>
+            <div>
+              <p style={{fontSize:10,textTransform:"uppercase",letterSpacing:".25em",
+                color:"rgba(180,197,255,.6)",fontWeight:500,margin:"0 0 4px"}}>ITSM Practice</p>
+              <h1 style={{fontSize:26,fontWeight:900,color:"#fff",margin:0,
+                fontFamily:"'Manrope',sans-serif",lineHeight:1.2}}>ITSM Maturity Assessor</h1>
+              <p style={{fontSize:11,color:"rgba(180,197,255,.5)",fontWeight:500,
+                letterSpacing:".08em",marginTop:4}}>ITIL 4 Intelligence Platform · V4.0</p>
+            </div>
+          </div>
+
+          <div style={{height:1,background:"rgba(180,197,255,.08)",margin:"24px 0"}}/>
+
+          {/* Error */}
+          {err && (
+            <div style={{background:"rgba(220,38,38,.12)",border:"1px solid rgba(220,38,38,.35)",
+              color:"#fca5a5",padding:"10px 14px",borderRadius:8,marginBottom:20,fontSize:13}}>
+              {err}
+            </div>
+          )}
+
+          {/* Form */}
+          <div style={{display:"flex",flexDirection:"column",gap:20}}>
+            <div>
+              <label style={{display:"block",fontSize:10,textTransform:"uppercase",letterSpacing:".15em",
+                color:"rgba(180,197,255,.7)",fontWeight:600,marginBottom:8}}>Professional ID</label>
+              <input
+                className="login-input"
+                value={u} onChange={e=>setU(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&handle()}
+                placeholder="Enter your corporate ID"
+                disabled={loading}
+                autoComplete="username"
+                style={{color:"#fff"}}
+              />
+            </div>
+            <div>
+              <label style={{display:"block",fontSize:10,textTransform:"uppercase",letterSpacing:".15em",
+                color:"rgba(180,197,255,.7)",fontWeight:600,marginBottom:8}}>Secure Token</label>
+              <input
+                className="login-input"
+                type="password"
+                value={p} onChange={e=>setP(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&handle()}
+                placeholder="••••••••••••"
+                disabled={loading}
+                autoComplete="current-password"
+                style={{color:"#fff"}}
+              />
+            </div>
+            <button className="login-btn-primary" onClick={handle} disabled={loading} style={{marginTop:4}}>
+              {loading ? "Signing in…" : "Sign In to Portal →"}
+            </button>
+          </div>
+
+          {/* Admin + badges */}
+          <div style={{marginTop:28,display:"flex",flexDirection:"column",alignItems:"center",gap:20}}>
+            <button className="login-admin-btn" onClick={onAdmin} disabled={loading}>
+              🔑 Admin Portal
+            </button>
+            <p style={{fontSize:10,color:"rgba(180,197,255,.25)",letterSpacing:".12em",
+              textTransform:"uppercase",fontWeight:500,margin:0}}>
+              Confidential · Authorised Access Only
+            </p>
+            <div style={{display:"flex",flexWrap:"wrap",justifyContent:"center",gap:6}}>
+              {["256-bit Encrypted","ISO 27001 Aligned","GDPR Compliant"].map(badge=>(
+                <span key={badge} style={{background:"rgba(0,169,79,.1)",border:"1px solid rgba(0,169,79,.2)",
+                  color:"#86efac",fontSize:9,padding:"3px 10px",borderRadius:999,fontWeight:500,
+                  display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{width:6,height:6,borderRadius:"50%",background:"#00a94f",flexShrink:0,display:"inline-block"}}/>
+                  {badge}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer style={{position:"fixed",bottom:0,left:0,width:"100%",zIndex:50,
+        padding:"0 0 20px",pointerEvents:"none",display:"flex",justifyContent:"center"}}>
+        <div style={{fontSize:9,color:"rgba(180,197,255,.25)",textTransform:"uppercase",
+          letterSpacing:".15em",textAlign:"center",fontWeight:500}}>
+          Developed by Gagandeep Singh · ITSM Practice · ITIL® is a registered trademark of AXELOS Limited
+        </div>
+      </footer>
     </div>
   );
 }
