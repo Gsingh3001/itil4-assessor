@@ -811,7 +811,7 @@ function UserLogin({ onLogin, onAdmin }) {
             {[
               ["⚡","34 ITIL 4 Practices","Comprehensive maturity scoring across the entire Service Value System."],
               ["📊","Five Dimensions","Process Existence · Consistency · Measurement · Improvement · Tool Integration"],
-              ["🏆","Boardroom-Ready Reports","PDF reports benchmarked against Gartner, Deloitte and KPMG industry standards."],
+              ["🏆","Boardroom-Ready Reports","Comprehensive PDF reports covering all 34 ITIL 4 practices — with dimensional scoring, industry benchmarks, and a data-driven transformation roadmap."],
             ].map(([icon,title,desc]) => (
               <div key={title} style={{display:"flex",alignItems:"flex-start",gap:16}}>
                 <div style={{width:32,height:32,borderRadius:8,background:"rgba(0,155,222,.1)",
