@@ -826,14 +826,25 @@ function UserLogin({ onLogin, onAdmin }) {
             ))}
           </div>
 
-          {/* Industry tags */}
+          {/* Trust badges */}
           <div style={{paddingTop:8}}>
             <p style={{fontSize:10,color:"rgba(180,197,255,.3)",textTransform:"uppercase",
-              letterSpacing:".12em",fontWeight:600,marginBottom:10}}>Trusted by IT leaders...</p>
-            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-              {["Financial Services","Healthcare","Government","Technology"].map(t=>(
-                <span key={t} style={{padding:"4px 12px",borderRadius:4,background:"rgba(255,255,255,.05)",
-                  color:"rgba(255,255,255,.4)",fontSize:10,fontWeight:500}}>{t}</span>
+              letterSpacing:".12em",fontWeight:600,marginBottom:12}}>
+              Not AI-generated. Not cloud-shared. Not generic.
+            </p>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[
+                ["🔒","100% Local — Data Never Leaves Your Browser"],
+                ["🚫","Zero LLM / Third-Party Cloud Exposure"],
+                ["🎯","Pure ITIL 4 — 34 Practices, No Shortcuts"],
+                ["🔮","ITIL 5 & AI Readiness Built In"],
+              ].map(([icon,text])=>(
+                <span key={text} style={{display:"inline-flex",alignItems:"center",gap:8,
+                  padding:"7px 14px",borderRadius:8,
+                  background:"rgba(0,155,222,.08)",border:"1px solid rgba(0,155,222,.2)",
+                  color:"rgba(180,197,255,.85)",fontSize:11,fontWeight:500}}>
+                  <span style={{fontSize:14}}>{icon}</span>{text}
+                </span>
               ))}
             </div>
           </div>
