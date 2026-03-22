@@ -2080,11 +2080,13 @@ function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, sele
           <div style={{color:"#fff",fontWeight:700,fontSize:16}}>{TOOL_NAME}</div>
           <div style={{color:"rgba(255,255,255,.6)",fontSize:11}}>{ORG_BRAND}</div>
         </div>
-        <button onClick={onReport}
-          style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
-            background:"rgba(255,255,255,.12)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
-          📄 View Full Report
-        </button>
+        {user?.role === "admin" && (
+          <button onClick={onReport}
+            style={{padding:"8px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,.3)",
+              background:"rgba(255,255,255,.12)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:600}}>
+            📄 View Full Report
+          </button>
+        )}
         <button onClick={onLogout}
           style={{padding:"8px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,.25)",
             background:"transparent",color:"rgba(255,255,255,.7)",cursor:"pointer",fontSize:12}}>
