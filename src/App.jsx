@@ -28,7 +28,7 @@ const SUBMISSION_KEY = "itsm_v4_submission"; // per-user: full submission data f
 const ITSM_TOOLS = ["ServiceNow","Jira","BMC Remedy","Freshservice","Zendesk","ManageEngine","Other"];
 const INDUSTRIES = ["Banking & Financial Services","Insurance","Healthcare & Life Sciences","Retail & Consumer",
   "Manufacturing","Telecommunications","Energy & Utilities","Public Sector / Government",
-  "Media & Entertainment","Technology","Professional Services","Airline","Logistics","Other"];
+  "Media & Entertainment","Technology","Professional Services","Airlines","Logistics","Other"];
 const EMP_SIZES  = ["<500","500–2000","2000–10000","10000+"];
 
 /* ─── Dimensions ────────────────────────────────────────────────── */
@@ -170,6 +170,7 @@ function parseQBFromSheet(rows) {
       fup_n:     String(r.followup_if_no || "").trim(),
       mandatory: String(r.is_mandatory || "N").trim().toUpperCase() === "Y",
       order:     Number(r.question_order) || 999,
+      industry:  String(r.industry_overlay || "ALL").trim(),
     });
   }
   // sort by order
@@ -663,6 +664,7 @@ export default function App() {
         practice={PRACTICES.find(p=>p.id===selectedPractice)}
         qb={qb} existingLevel={levels[selectedPractice]}
         existingAnswers={answers[selectedPractice]}
+        industry={companyProfile?.industry || ""}
         onSubmit={submitAssessment} onBack={() => setScreen("practices")}
         showToast={showToast} readOnly={submitted} />}
       {screen === "submitted"  && <SubmittedScreen user={user} scores={scores}
@@ -2486,15 +2488,17 @@ function SubmittedScreen({ user, scores, dimScores, levels, companyProfile, sele
 }
 
 
-function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, onBack, showToast, readOnly }) {
+function AssessScreen({ practice, qb, existingLevel, existingAnswers, industry, onSubmit, onBack, showToast, readOnly }) {
   const [level, setLevel]       = useState(existingLevel || null);
   const [answers, setAnswers]   = useState(existingAnswers || {});  // { qid: { main: 2|1|0, fup: 1|0.5|0 } }
   const [confirmed, setConfirmed] = useState(false);
 
   const questions = useMemo(() => {
     if (!level || !practice) return [];
-    return qb?.[practice.id]?.[level] || [];
-  }, [level, practice, qb]);
+    const all = qb?.[practice.id]?.[level] || [];
+    if (!industry) return all;
+    return all.filter(q => q.industry === "ALL" || q.industry === industry);
+  }, [level, practice, qb, industry]);
 
   function setMain(qid, val) {
     if (readOnly) return;
@@ -2543,9 +2547,12 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
           Choose the level that best reflects your team's current knowledge and experience.
         </p>
         {[
-          { key:"beginner", label:"Beginner", icon:"🟢", desc:"Existence-focused. Basic process awareness, no deep ITIL knowledge assumed.", qcount: qb?.[practice?.id]?.beginner?.length||6 },
-          { key:"practitioner", label:"Practitioner", icon:"🟡", desc:"Consistency & metrics. Working ITIL knowledge, process in regular use.", qcount: qb?.[practice?.id]?.practitioner?.length||8 },
-          { key:"expert", label:"Expert", icon:"🔴", desc:"Quantitative evidence. Actual numbers (MTTR, SLA%, CFR), advanced analysis.", qcount: qb?.[practice?.id]?.expert?.length||10 },
+          { key:"beginner", label:"Beginner", icon:"🟢", desc:"Existence-focused. Basic process awareness, no deep ITIL knowledge assumed.",
+            qcount: (qb?.[practice?.id]?.beginner||[]).filter(q=>!industry||q.industry==="ALL"||q.industry===industry).length||6 },
+          { key:"practitioner", label:"Practitioner", icon:"🟡", desc:"Consistency & metrics. Working ITIL knowledge, process in regular use.",
+            qcount: (qb?.[practice?.id]?.practitioner||[]).filter(q=>!industry||q.industry==="ALL"||q.industry===industry).length||8 },
+          { key:"expert", label:"Expert", icon:"🔴", desc:"Quantitative evidence. Actual numbers (MTTR, SLA%, CFR), advanced analysis.",
+            qcount: (qb?.[practice?.id]?.expert||[]).filter(q=>!industry||q.industry==="ALL"||q.industry===industry).length||10 },
         ].map(opt => (
           <div key={opt.key} onClick={() => setLevel(opt.key)}
             style={{background:"#fff",borderRadius:14,padding:24,marginBottom:16,cursor:"pointer",
@@ -2579,6 +2586,10 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
             <div style={{color:"#fff",fontWeight:700,fontSize:15}}>{practice.name}</div>
             <div style={{color:"rgba(255,255,255,.6)",fontSize:11}}>
               {level.charAt(0).toUpperCase()+level.slice(1)} · {answeredMain}/{questions.length} answered · {pct}%
+              {industry && <span style={{marginLeft:8,background:"rgba(255,255,255,.15)",
+                borderRadius:4,padding:"1px 6px",fontSize:10,color:"rgba(255,255,255,.8)"}}>
+                ✈ {industry}
+              </span>}
             </div>
           </div>
           <button onClick={()=>setLevel(null)} style={{padding:"6px 12px",borderRadius:8,
@@ -2638,6 +2649,12 @@ function AssessScreen({ practice, qb, existingLevel, existingAnswers, onSubmit, 
                     {q.mandatory && (
                       <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,
                         background:"#fef2f2",color:"#dc2626",fontWeight:600}}>Required</span>
+                    )}
+                    {q.industry && q.industry !== "ALL" && (
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:10,
+                        background:"#eff6ff",color:"#1d4ed8",fontWeight:600}}>
+                        ✦ {q.industry}
+                      </span>
                     )}
                   </div>
                   <p style={{margin:0,color:"#1e293b",fontSize:14,lineHeight:1.65,fontWeight:500}}>
