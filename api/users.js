@@ -1,22 +1,21 @@
 /**
- * /api/users.js — User management backed by Vercel KV
+ * /api/users.js — User management backed by Vercel Blob
  *
- * Setup (Vercel Dashboard):
- *   1. Storage → Create KV Database → link to project
- *   2. Environment variables KV_URL, KV_REST_API_URL, KV_REST_API_TOKEN,
- *      KV_REST_API_READ_ONLY_TOKEN are injected automatically.
+ * Users are stored at: itsm/credentials/users.json
+ * The BLOB_READ_WRITE_TOKEN env var must be present (same store as reports.js).
  *
  * Endpoints:
- *   POST  /api/users?action=init   — seed Admin user if KV is empty (no auth required)
- *   POST  /api/users?action=auth   — authenticate { username, password } → { name, role }
- *   GET   /api/users               — list users (admin only, Basic auth)
- *   POST  /api/users               — create user (admin only, Basic auth)
- *   DELETE /api/users?username=X   — delete user (admin only, Basic auth)
+ *   PUT  /api/users?action=init   — seed Admin user if Blob is empty (no auth)
+ *   POST /api/users?action=auth   — authenticate { username, password } → { name, role }
+ *   GET  /api/users               — list users (admin only, Basic auth)
+ *   POST /api/users               — create user (admin only, Basic auth)
+ *   PUT  /api/users?username=X    — update user (admin only, Basic auth)
+ *   DELETE /api/users?username=X  — delete user (admin only, Basic auth)
  */
 
-import { kv } from "@vercel/kv";
+import { put, list, del } from "@vercel/blob";
 
-const USERS_KV_KEY = "itsm_v4_users";
+const USERS_PATH    = "itsm/credentials/users.json";
 const DEFAULT_ADMIN = {
   Admin: { password: "Guessme0t", role: "admin", name: "Administrator" },
 };
@@ -24,20 +23,45 @@ const DEFAULT_ADMIN = {
 /* ── helpers ─────────────────────────────────────────────────────── */
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
 }
 
+async function readUsers() {
+  try {
+    const { blobs } = await list({ prefix: USERS_PATH });
+    if (!blobs.length) return null;
+    const resp = await fetch(blobs[0].url, { cache: "no-store" });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+async function writeUsers(users) {
+  await put(USERS_PATH, JSON.stringify(users), {
+    access: "public",
+    addRandomSuffix: false,
+    contentType: "application/json",
+  });
+}
+
 async function getUsers() {
-  const users = await kv.get(USERS_KV_KEY);
-  return users || DEFAULT_ADMIN;
+  const users = await readUsers();
+  if (!users) {
+    // First run: seed default admin and persist
+    await writeUsers(DEFAULT_ADMIN);
+    return DEFAULT_ADMIN;
+  }
+  return users;
 }
 
 async function verifyAdmin(req) {
   const auth = req.headers.authorization || "";
   if (!auth.startsWith("Basic ")) return false;
   const decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
-  const colon = decoded.indexOf(":");
+  const colon   = decoded.indexOf(":");
   if (colon === -1) return false;
   const username = decoded.slice(0, colon);
   const password = decoded.slice(colon + 1);
@@ -51,12 +75,19 @@ export default async function handler(req, res) {
   cors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
 
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return res.status(503).json({
+      error: "Blob storage not configured",
+      detail: "BLOB_READ_WRITE_TOKEN is not set. Link the Blob store to this project in the Vercel dashboard.",
+    });
+  }
+
   try {
     /* ── INIT: seed admin on first deploy ──────────────────────── */
     if (req.method === "PUT" && req.query.action === "init") {
-      const existing = await kv.get(USERS_KV_KEY);
+      const existing = await readUsers();
       if (!existing) {
-        await kv.set(USERS_KV_KEY, DEFAULT_ADMIN);
+        await writeUsers(DEFAULT_ADMIN);
         return res.status(200).json({ seeded: true });
       }
       return res.status(200).json({ seeded: false, message: "Already initialised" });
@@ -72,9 +103,9 @@ export default async function handler(req, res) {
       if (!u || u.password !== password)
         return res.status(401).json({ error: "Invalid credentials" });
       return res.status(200).json({
-        name: u.name || username,
-        role: u.role || "user",
-        isSubmitted: !!u.isSubmitted
+        name:        u.name || username,
+        role:        u.role || "user",
+        isSubmitted: !!u.isSubmitted,
       });
     }
 
@@ -102,12 +133,30 @@ export default async function handler(req, res) {
         return res.status(409).json({ error: `User '${username}' already exists` });
       users[username] = {
         password,
-        name: name || username,
-        role: role || "user",
+        name:      name || username,
+        role:      role || "user",
         createdAt: new Date().toISOString(),
       };
-      await kv.set(USERS_KV_KEY, users);
+      await writeUsers(users);
       return res.status(201).json({ success: true, username });
+    }
+
+    /* ── PUT: update user (admin only) ─────────────────────────── */
+    if (req.method === "PUT") {
+      if (!(await verifyAdmin(req)))
+        return res.status(403).json({ error: "Admin credentials required" });
+      const { username } = req.query;
+      if (!username) return res.status(400).json({ error: "username query param required" });
+      const { password, name, role, isSubmitted } = req.body || {};
+      const users = await getUsers();
+      if (!users[username])
+        return res.status(404).json({ error: `User '${username}' not found` });
+      if (password)      users[username].password    = password;
+      if (name)          users[username].name        = name;
+      if (role)          users[username].role        = role;
+      if (isSubmitted !== undefined) users[username].isSubmitted = isSubmitted;
+      await writeUsers(users);
+      return res.status(200).json({ success: true, username });
     }
 
     /* ── DELETE: remove user (admin only) ──────────────────────── */
@@ -122,7 +171,7 @@ export default async function handler(req, res) {
       if (!users[username])
         return res.status(404).json({ error: `User '${username}' not found` });
       delete users[username];
-      await kv.set(USERS_KV_KEY, users);
+      await writeUsers(users);
       return res.status(200).json({ success: true, deleted: username });
     }
 

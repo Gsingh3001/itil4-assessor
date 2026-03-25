@@ -4,7 +4,7 @@
     { "source": "/(.*)",     "destination": "/index.html" }
   ],
   "functions": {
-    "api/users.js":   { "maxDuration": 10 },
+    "api/users.js":   { "maxDuration": 20 },
     "api/reports.js": { "maxDuration": 30 }
   }
 }
