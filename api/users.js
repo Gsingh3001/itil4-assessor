@@ -27,6 +27,28 @@ function cors(res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
 }
 
+/** Convert array-of-user-objects to { username: userObj } map (handles legacy format) */
+function normalizeUsers(data) {
+  if (!data) return null;
+  if (Array.isArray(data)) {
+    const obj = {};
+    for (const u of data) {
+      if (u.username) {
+        obj[u.username] = {
+          password:  u.password,
+          role:      u.role      || "user",
+          name:      u.name      || u.username,
+          email:     u.email     || "",
+          createdAt: u.createdAt || new Date().toISOString(),
+        };
+      }
+    }
+    return Object.keys(obj).length > 0 ? obj : null;
+  }
+  // Already object/map format
+  return typeof data === "object" ? data : null;
+}
+
 async function readUsers() {
   try {
     const { blobs } = await list({ prefix: USERS_PATH });
@@ -35,7 +57,7 @@ async function readUsers() {
     const fetchUrl = blobs[0].downloadUrl || blobs[0].url;
     const resp = await fetch(fetchUrl, { cache: "no-store" });
     if (!resp.ok) return null;
-    return await resp.json();
+    return normalizeUsers(await resp.json());
   } catch {
     return null;
   }
