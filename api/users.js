@@ -31,7 +31,9 @@ async function readUsers() {
   try {
     const { blobs } = await list({ prefix: USERS_PATH });
     if (!blobs.length) return null;
-    const resp = await fetch(blobs[0].url, { cache: "no-store" });
+    // Prefer downloadUrl (bypasses CDN cache) — falls back to url if absent
+    const fetchUrl = blobs[0].downloadUrl || blobs[0].url;
+    const resp = await fetch(fetchUrl, { cache: "no-store" });
     if (!resp.ok) return null;
     return await resp.json();
   } catch {
@@ -83,6 +85,21 @@ export default async function handler(req, res) {
   }
 
   try {
+    /* ── DEBUG: inspect blob state (no auth) ───────────────────── */
+    if (req.method === "GET" && req.query.action === "debug") {
+      const { blobs } = await list({ prefix: USERS_PATH });
+      const raw = await readUsers();
+      const usernames = raw ? Object.keys(raw) : [];
+      return res.status(200).json({
+        blobFound: blobs.length > 0,
+        blobUrl:   blobs[0]?.url || null,
+        downloadUrl: blobs[0]?.downloadUrl || null,
+        uploadedAt: blobs[0]?.uploadedAt || null,
+        userCount: usernames.length,
+        usernames,
+      });
+    }
+
     /* ── INIT: seed admin on first deploy ──────────────────────── */
     if (req.method === "PUT" && req.query.action === "init") {
       const existing = await readUsers();

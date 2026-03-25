@@ -31,7 +31,9 @@ async function readUsers() {
   try {
     const { blobs } = await list({ prefix: USERS_PATH });
     if (!blobs.length) return null;
-    const resp = await fetch(blobs[0].url, { cache: "no-store" });
+    // Prefer downloadUrl (bypasses CDN cache) — falls back to url if absent
+    const fetchUrl = blobs[0].downloadUrl || blobs[0].url;
+    const resp = await fetch(fetchUrl, { cache: "no-store" });
     if (!resp.ok) return null;
     return await resp.json();
   } catch {
